@@ -6,6 +6,8 @@ import { shanghaiDate } from '../lib/time';
 import type { StorageService } from '../services/storage';
 import type { WechatService } from '../services/wechat';
 import { syncRecordForMedia } from '../services/media-state';
+import type { MetricsRegistry } from '../observability/metrics';
+import { analyticsUserHash } from '../lib/analytics';
 
 interface RunnerDependencies {
   pool: Pool;
@@ -15,6 +17,7 @@ interface RunnerDependencies {
   logger: Logger;
   instanceId: string;
   scheduleMediaWake?: (delayMs: number) => void;
+  metrics?: MetricsRegistry;
 }
 
 interface OutboxRow extends RowDataPacket {
@@ -49,7 +52,7 @@ class MediaProcessingError extends Error {
 }
 
 export interface JobRunnerController {
-  stop: () => void;
+  stop: (timeoutMs?: number) => Promise<void>;
   wake: () => void;
 }
 
@@ -57,25 +60,30 @@ export function startJobRunner(dependencies: RunnerDependencies): JobRunnerContr
   let running = false;
   let stopped = false;
   let wakeRequested = false;
+  let activeCycle: Promise<void> | null = null;
   const delayedWakes = new Set<ReturnType<typeof setTimeout>>();
-  const tick = async () => {
+  const tick = async (): Promise<void> => {
     if (stopped) return;
     if (running) {
       wakeRequested = true;
-      return;
+      return activeCycle ?? Promise.resolve();
     }
     running = true;
-    try {
-      await runCycle(dependencies);
-    } catch (error) {
-      dependencies.logger.error({ err: error }, 'job cycle failed');
-    } finally {
-      running = false;
-      if (wakeRequested && !stopped) {
-        wakeRequested = false;
-        queueMicrotask(() => void tick());
+    activeCycle = (async () => {
+      try {
+        await runCycle(dependencies);
+      } catch (error) {
+        dependencies.logger.error({ err: error }, 'job cycle failed');
+      } finally {
+        running = false;
+        activeCycle = null;
+        if (wakeRequested && !stopped) {
+          wakeRequested = false;
+          queueMicrotask(() => void tick());
+        }
       }
-    }
+    })();
+    await activeCycle;
   };
   const timer = setInterval(() => void tick(), 15_000);
   timer.unref();
@@ -90,11 +98,26 @@ export function startJobRunner(dependencies: RunnerDependencies): JobRunnerContr
   void tick();
   return {
     wake: () => void tick(),
-    stop: () => {
+    stop: async (timeoutMs = 8_000) => {
       stopped = true;
+      wakeRequested = false;
       clearInterval(timer);
       delayedWakes.forEach((delayed) => clearTimeout(delayed));
       delayedWakes.clear();
+      const draining = activeCycle;
+      if (!draining) return;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          draining,
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => reject(new Error(`Job runner drain timed out after ${timeoutMs}ms`)), timeoutMs);
+            timeout.unref();
+          }),
+        ]);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
     },
   };
 }
@@ -109,13 +132,15 @@ async function runCycle(deps: RunnerDependencies): Promise<void> {
   const now = new Date();
   const minuteKey = now.toISOString().slice(0, 16);
   await runScheduled(deps, 'expire_state', minuteKey, () => expireState(deps.pool));
-  await runScheduled(deps, 'reminders', minuteKey, () => sendReminders(deps));
+  if (deps.config.capabilities.subscriptions) {
+    await runScheduled(deps, 'reminders', minuteKey, () => sendReminders(deps));
+  }
 
   const shanghaiNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
   const hourKey = shanghaiNow.toISOString().slice(0, 13);
   await runScheduled(deps, 'cleanup', hourKey, () => cleanupExpiredRows(deps.pool));
   await runScheduled(deps, 'recycle_purge', hourKey, () => purgeExpiredModules(deps.pool));
-  await runScheduled(deps, 'account_deletion', hourKey, () => finalizeAccountDeletions(deps.pool));
+  await runScheduled(deps, 'account_deletion', hourKey, () => finalizeAccountDeletions(deps));
 
   if (shanghaiNow.getUTCMinutes() >= 5 && shanghaiNow.getUTCMinutes() < 10) {
     const yesterday = new Date(shanghaiNow);
@@ -123,6 +148,7 @@ async function runCycle(deps: RunnerDependencies): Promise<void> {
     const date = yesterday.toISOString().slice(0, 10);
     await runScheduled(deps, 'daily_snapshot', date, () => createDailySnapshots(deps.pool, date));
   }
+  await collectQueueMetrics(deps);
 }
 
 async function runScheduled(
@@ -133,14 +159,27 @@ async function runScheduled(
 ): Promise<void> {
   const claimed = await claimScheduled(deps.pool, jobName, runKey, deps.instanceId);
   if (!claimed) return;
+  const startedAt = Date.now();
+  let leaseLost = false;
+  const heartbeat = setInterval(() => {
+    void renewScheduledLease(deps.pool, jobName, runKey, deps.instanceId)
+      .then((renewed) => { if (!renewed) leaseLost = true; })
+      .catch((error: unknown) => {
+        leaseLost = true;
+        deps.logger.error({ err: error, jobName, runKey }, 'scheduled job lease renewal failed');
+      });
+  }, 60_000);
+  heartbeat.unref();
   try {
     await work();
+    if (leaseLost) throw new Error(`Scheduled job lease was lost: ${jobName}/${runKey}`);
     await deps.pool.execute(
       `UPDATE scheduled_job_run SET status = 'completed', completed_at = UTC_TIMESTAMP(3),
          locked_by = NULL, lock_expires_at = NULL, last_error = NULL
         WHERE job_name = ? AND run_key = ? AND locked_by = ?`,
       [jobName, runKey, deps.instanceId],
     );
+    deps.metrics?.increment('scheduled_job_total', { job_name: jobName, result: 'completed' });
   } catch (error) {
     await deps.pool.execute(
       `UPDATE scheduled_job_run SET status = 'failed', last_error = ?, locked_by = NULL, lock_expires_at = NULL
@@ -148,7 +187,21 @@ async function runScheduled(
       [safeError(error), jobName, runKey, deps.instanceId],
     );
     deps.logger.error({ err: error, jobName, runKey }, 'scheduled job failed');
+    deps.metrics?.increment('scheduled_job_total', { job_name: jobName, result: 'failed' });
+  } finally {
+    clearInterval(heartbeat);
+    deps.metrics?.observe('scheduled_job_duration_seconds', (Date.now() - startedAt) / 1000, { job_name: jobName });
   }
+}
+
+async function renewScheduledLease(pool: Pool, jobName: string, runKey: string, instanceId: string): Promise<boolean> {
+  const [result] = await pool.execute<ResultSetHeader>(
+    `UPDATE scheduled_job_run
+        SET lock_expires_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE)
+      WHERE job_name = ? AND run_key = ? AND status = 'running' AND locked_by = ?`,
+    [jobName, runKey, instanceId],
+  );
+  return result.affectedRows === 1;
 }
 
 async function claimScheduled(pool: Pool, jobName: string, runKey: string, instanceId: string): Promise<boolean> {
@@ -183,12 +236,14 @@ async function processMediaEvents(deps: RunnerDependencies): Promise<void> {
         mediaId: event.aggregate_id,
         queueDelayMs: Math.max(0, Date.now() - new Date(event.created_at).getTime()),
       }, 'media processing started');
+      deps.metrics?.observe('media_queue_seconds', Math.max(0, Date.now() - new Date(event.created_at).getTime()) / 1000);
       await processOneMedia(deps, event.aggregate_id);
       await publishEvent(deps.pool, event.event_id);
     } catch (error) {
       const retryDelay = await retryEvent(deps.pool, event, error);
-      deps.scheduleMediaWake?.(retryDelay * 1000);
+      if (retryDelay > 0) deps.scheduleMediaWake?.(retryDelay * 1000);
       deps.logger.error({ err: error, mediaId: event.aggregate_id }, 'media processing failed');
+      deps.metrics?.increment('media_processing_total', { result: 'failed' });
     }
   }));
 }
@@ -391,7 +446,7 @@ async function processMemoryExportEvents(deps: RunnerDependencies): Promise<void
 
 async function publishPassiveEvents(pool: Pool): Promise<void> {
   await pool.execute(
-    `UPDATE outbox_event SET status = 'published', published_at = UTC_TIMESTAMP(3)
+    `UPDATE outbox_event SET status = 'audited', published_at = UTC_TIMESTAMP(3)
       WHERE status IN ('pending', 'failed')
         AND event_type NOT IN ('media.processing_requested', 'storage.delete_requested',
           'invite.code_requested', 'memory.export_requested')
@@ -430,15 +485,16 @@ async function publishEvent(pool: Pool, eventId: string): Promise<void> {
 
 async function retryEvent(pool: Pool, event: OutboxRow, error: unknown): Promise<number> {
   const retry = event.retry_count + 1;
+  const deadLetter = retry >= 8;
   const retryDelay = event.event_type === 'media.processing_requested'
     ? (retry === 1 ? 2 : 5)
     : Math.min(3600, 15 * 2 ** Math.min(retry, 8));
   await pool.execute(
-    `UPDATE outbox_event SET status = 'failed', retry_count = ?,
-       next_retry_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL ? SECOND),
+    `UPDATE outbox_event SET status = ?, retry_count = ?,
+       next_retry_at = IF(? = 1, NULL, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL ? SECOND)),
        payload = JSON_SET(payload, '$.lastError', ?)
      WHERE event_id = ?`,
-    [retry, retryDelay, safeError(error), event.event_id],
+    [deadLetter ? 'dead_letter' : 'failed', retry, deadLetter ? 1 : 0, retryDelay, safeError(error), event.event_id],
   );
   if (event.event_type === 'media.processing_requested') {
     const stages = error instanceof MediaProcessingError ? error.stages : ['cutout'] as MediaFailureStage[];
@@ -465,7 +521,23 @@ async function retryEvent(pool: Pool, event: OutboxRow, error: unknown): Promise
       [failedCutout ? 1 : 0, failedReview ? 1 : 0, failureCode, safeError(error), event.aggregate_id],
     );
   }
-  return retryDelay;
+  return deadLetter ? 0 : retryDelay;
+}
+
+async function collectQueueMetrics(deps: RunnerDependencies): Promise<void> {
+  if (!deps.metrics) return;
+  const [rows] = await deps.pool.query<RowDataPacket[]>(
+    `SELECT event_type, status, COUNT(*) AS total,
+            COALESCE(TIMESTAMPDIFF(SECOND, MIN(created_at), UTC_TIMESTAMP(3)), 0) AS oldest_seconds
+       FROM outbox_event
+      WHERE status IN ('pending', 'failed', 'publishing')
+      GROUP BY event_type, status`,
+  );
+  for (const row of rows) {
+    const labels = { event_type: String(row.event_type), status: String(row.status) };
+    deps.metrics.setGauge('outbox_pending_total', Number(row.total), labels);
+    deps.metrics.setGauge('outbox_oldest_age_seconds', Number(row.oldest_seconds), labels);
+  }
 }
 
 async function expireState(pool: Pool): Promise<void> {
@@ -594,8 +666,9 @@ async function createDailySnapshots(pool: Pool, recordDate: string): Promise<voi
 async function cleanupExpiredRows(pool: Pool): Promise<void> {
   await pool.execute(`DELETE FROM auth_session WHERE expires_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY) OR revoked_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 7 DAY)`);
   await pool.execute(`DELETE FROM idempotency_request WHERE expire_at < UTC_TIMESTAMP(3)`);
-  await pool.execute(`DELETE FROM outbox_event WHERE status = 'published' AND published_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 30 DAY)`);
+  await pool.execute(`DELETE FROM outbox_event WHERE status IN ('published', 'audited') AND published_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 30 DAY)`);
   await pool.execute(`DELETE FROM scheduled_job_run WHERE status = 'completed' AND completed_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 30 DAY)`);
+  await pool.execute(`DELETE FROM analytics_event WHERE received_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 90 DAY)`);
   const [orphans] = await pool.execute<RowDataPacket[]>(
     `SELECT media_id, original_file_key, thumbnail_file_key, sticker_file_key, sticker_thumbnail_file_key
        FROM media_asset ma
@@ -670,7 +743,8 @@ async function purgeModule(pool: Pool, moduleId: string): Promise<void> {
   });
 }
 
-async function finalizeAccountDeletions(pool: Pool): Promise<void> {
+async function finalizeAccountDeletions(deps: RunnerDependencies): Promise<void> {
+  const { pool } = deps;
   const [users] = await pool.execute<RowDataPacket[]>(
     `SELECT deletion_request_id, user_id FROM account_deletion_request
       WHERE (status = 'cooling_off' AND execute_after <= UTC_TIMESTAMP(3)) OR status = 'processing'
@@ -709,11 +783,11 @@ async function finalizeAccountDeletions(pool: Pool): Promise<void> {
     );
     for (const module of ownedModules) await purgeModule(pool, String(module.module_id));
 
-    await eraseUserData(pool, String(item.user_id), String(item.deletion_request_id));
+    await eraseUserData(pool, String(item.user_id), String(item.deletion_request_id), deps.config.analyticsHashSalt);
   }
 }
 
-async function eraseUserData(pool: Pool, userId: string, deletionRequestId: string): Promise<void> {
+async function eraseUserData(pool: Pool, userId: string, deletionRequestId: string, analyticsHashSalt: string | null): Promise<void> {
   await inTransaction(pool, async (connection) => {
     const [media] = await connection.execute<RowDataPacket[]>(
       `SELECT media_id, original_file_key, thumbnail_file_key, sticker_file_key, sticker_thumbnail_file_key
@@ -815,6 +889,9 @@ async function eraseUserData(pool: Pool, userId: string, deletionRequestId: stri
     await connection.execute('DELETE FROM reminder_subscription WHERE user_id = ?', [userId]);
     await connection.execute('DELETE FROM user_module_preference WHERE user_id = ?', [userId]);
     await connection.execute('DELETE FROM idempotency_request WHERE user_id = ?', [userId]);
+    if (analyticsHashSalt) {
+      await connection.execute('DELETE FROM analytics_event WHERE user_hash = ?', [analyticsUserHash(userId, analyticsHashSalt)]);
+    }
     await connection.execute(
       `UPDATE module_member SET status = IF(status = 'active', 'exited', status),
          left_at = COALESCE(left_at, UTC_TIMESTAMP(3)), leave_reason = COALESCE(leave_reason, 'account_deleted'),

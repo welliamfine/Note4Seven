@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config';
 import { StorageService } from '../src/services/storage';
+import { productionEnvironment } from './fixtures/production-config';
 
 describe('COS signed URL freshness', () => {
   afterEach(() => {
@@ -22,10 +23,7 @@ describe('COS signed URL freshness', () => {
     }), { status: 200 }));
     vi.stubGlobal('fetch', fetchCredentials);
     const storage = new StorageService(loadConfig({
-      NODE_ENV: 'production',
-      MYSQL_ADDRESS: '127.0.0.1:3306',
-      MYSQL_USERNAME: 'root',
-      MYSQL_PASSWORD: 'test',
+      ...productionEnvironment,
     }));
 
     const firstUrl = await storage.signedUrl('media/1/38/sticker-thumb.webp');

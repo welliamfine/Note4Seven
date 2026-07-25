@@ -10,6 +10,7 @@ const allowedExampleValues = new Set([
   'storage-event-token-at-least-24',
   'temporary-secret-key',
   'must not be logged',
+  '<secret>',
 ]);
 const detectors = [
   { name: 'private-key', pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g },
@@ -29,9 +30,17 @@ try {
 }
 
 const findings = [];
+let scannedFiles = 0;
 for (const file of files) {
   if (binaryExtensions.has(extname(file).toLowerCase())) continue;
-  const source = await readFile(file, 'utf8');
+  let source;
+  try {
+    source = await readFile(file, 'utf8');
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
+    throw error;
+  }
+  scannedFiles += 1;
   for (const detector of detectors) {
     detector.pattern.lastIndex = 0;
     for (const match of source.matchAll(detector.pattern)) {
@@ -49,5 +58,5 @@ if (findings.length > 0) {
   for (const finding of findings) console.error(`- ${finding.file}:${finding.line} (${finding.detector})`);
   process.exitCode = 1;
 } else {
-  console.log(`[secret-scan] passed (${files.length} tracked/unignored files scanned)`);
+  console.log(`[secret-scan] passed (${scannedFiles} tracked/unignored text files scanned)`);
 }

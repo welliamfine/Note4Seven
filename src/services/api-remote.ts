@@ -26,4 +26,11 @@ export type {
 
 export * from './remote-api';
 
-export function initializeApi(): void {}
+import { remoteRequest } from './transport-client';
+import { initializeTracking } from './tracker';
+
+export function initializeApi(): void {
+  initializeTracking(async (events) => {
+    await remoteRequest('/analytics/events', { method: 'POST', data: { events } });
+  });
+}

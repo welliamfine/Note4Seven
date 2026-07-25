@@ -29,7 +29,7 @@ import type {
 import { addDays, buildMonthGrid, differenceInDays, shanghaiDate, shanghaiNowIso } from '../utils/date';
 import { createId } from '../utils/id';
 import { readDatabase, STICKER_PATHS, updateDatabase } from './database';
-import { track } from './tracker';
+import { setTrackingConsent, track } from './tracker';
 
 const delay = (milliseconds = 120): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const isFormalRecord = (record: LifeRecord): boolean => record.status === 'active' || record.status === 'locked';
@@ -1808,8 +1808,9 @@ export async function getPrivacyView(): Promise<PrivacyView> {
   return { version: 'V1.0', updatedDate: database.privacyVersion, deletionRequest: database.accountDeletionRequest };
 }
 
-export async function syncPrivacyConsent(_agreed: boolean): Promise<void> {
+export async function syncPrivacyConsent(agreed: boolean): Promise<void> {
   await delay(20);
+  setTrackingConsent(agreed);
 }
 
 export async function requestAccountDeletion(): Promise<NonNullable<AppDatabase['accountDeletionRequest']>> {

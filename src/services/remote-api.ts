@@ -21,7 +21,7 @@ import type {
 } from '../types/domain';
 import { buildMonthGrid, shanghaiDate, shanghaiNowIso } from '../utils/date';
 import { createId } from '../utils/id';
-import { track } from './tracker';
+import { setTrackingConsent, track } from './tracker';
 import type {
   CreateModuleInput,
   GalleryView,
@@ -664,6 +664,7 @@ export async function syncPrivacyConsent(agreed: boolean): Promise<void> {
       clientRequestId: createId(agreed ? 'privacy_agree' : 'privacy_revoke'),
     },
   });
+  setTrackingConsent(agreed);
 }
 
 export async function requestAccountDeletion(): Promise<AccountDeletionRequest> {

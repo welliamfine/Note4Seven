@@ -269,15 +269,19 @@ function recordList(value: unknown): Record<string, unknown>[] {
 }
 
 function verifySignature(request: Request, config: AppConfig): void {
-  if (!config.wechatCallbackToken) throw new AppError('CALLBACK_NOT_CONFIGURED', '微信回调尚未配置', 503);
+  const callbackTokens = [config.wechatCallbackToken, config.wechatCallbackTokenPrevious]
+    .filter((value): value is string => Boolean(value));
+  if (callbackTokens.length === 0) throw new AppError('CALLBACK_NOT_CONFIGURED', '微信回调尚未配置', 503);
   const timestamp = query(request, 'timestamp');
   const nonce = query(request, 'nonce');
   const signature = query(request, 'signature');
   if (!timestamp || !nonce || !signature) throw new AppError('INVALID_CALLBACK_SIGNATURE', '回调签名不正确', 401);
-  const expected = createHash('sha1').update([config.wechatCallbackToken, timestamp, nonce].sort().join('')).digest('hex');
-  const actualBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) {
+  const actualBuffer = createHash('sha256').update(signature).digest();
+  const valid = callbackTokens.map((token) => {
+    const expected = createHash('sha1').update([token, timestamp, nonce].sort().join('')).digest('hex');
+    return timingSafeEqual(actualBuffer, createHash('sha256').update(expected).digest());
+  }).some(Boolean);
+  if (!valid) {
     throw new AppError('INVALID_CALLBACK_SIGNATURE', '回调签名不正确', 401);
   }
 }

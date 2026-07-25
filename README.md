@@ -1,73 +1,70 @@
 # 记录我的一辈子
 
-微信原生小程序 RC，依据 `docs` 中的 PRD V6.4、页面流程 V6.4、状态机/接口/数据库/埋点 V1.1 和 Figma 原型实现。
+微信原生小程序与 CloudBase 后端。仓库包含小程序、Express/MySQL 服务、COS 对象创建触发函数，三者使用同一 release ID 发布。
 
-## 当前能力
+## 环境要求
 
-- 四 Tab 与 Figma 对齐的基础视觉；
-- 首页置顶/普通分组、管理态、动态贴纸堆；
-- 模块创建底部弹层、模板预填、校验和未保存确认；
-- 1-4 人成员状态与固定槽位贴纸月历；
-- 日期详情半屏面板，包含未来日期紧凑只读状态；
-- 今日照片新增/编辑/删除/重新记录；
-- 相机/相册二级操作面板、10MB 校验、处理进度、失败重试结构；
-- 上海业务日、`clientRequestId` 幂等、`firstEffectiveAt` 排序和本地持久化；
-- 邀请分享、公开邀请介绍、申请加入与创建者审批；
-- 成员管理、创建者转让、移出成员、普通成员退出和退出即失权；
-- 通知中心与模块待办分开统计，支持单条/全部已读；
-- 固定六种回应，支持新增、更换、取消且不能回应自己的记录；
-- D-1 至 D-3 补卡，单人直接锁定，多人进入审批；
-- 按月图片合集、贴纸预览、原图查看和返回日期详情；
-- 个人提醒时间、小程序内提醒、每日去重和微信订阅状态；
-- 模块删除 7 天回收期、级联停写、创建者恢复和到期清理；
-- 日终成员快照、准确共同完成统计、稳定公平月度贴纸抽取；
-- 模块/月选择、换一组和月度卡保存到相册；
-- 隐私版本、账号删除申请、7 天冷静期和撤销；
-- 回忆、发现、我的三个 Tab 的 RC 状态。
+- Node.js 22.x（见 `.nvmrc` 和 `.node-version`）
+- npm 11.x
+- 本地后端联调需 Docker Desktop 及 MySQL 5.7 容器
+- 真实云联调需已配置的 development/staging CloudBase 资源
 
-RC 使用本地 Mock 服务适配器，无需后端账号即可验收。用户选择的原图保存在小程序本地文件系统，抠图异步流程使用 `mock_image` 中的透明贴纸模拟 `processing → ready`。数据访问集中在 `src/services/api.ts`，后续切换 REST 后端时页面无需改写业务规则。
-
-## 运行
+## 干净安装与验证
 
 ```powershell
-npm install
-npm run verify
+npm run ci:install
+npm run verify:all
 ```
 
-然后用微信开发者工具导入仓库根目录。项目配置会读取 `dist/`；修改源码后运行：
+`ci:install` 会对根项目、`server/` 和 COS 触发函数执行锁定依赖安装。`verify:all` 覆盖静态检查、类型检查、测试、OpenAPI/迁移漂移检查和三个发布单元构建。
+
+## 构建模式
 
 ```powershell
-npm run dev
+npm run build:mock
+npm run build:local-backend
+npm run build:staging
+npm run build:production
 ```
 
-正式联调前，将 `project.config.json` 中的 `touristappid` 替换为项目自己的 AppID。
+- `mock` 仅用于本地 UI/交互验收，Mock 图片不会进入生产包。
+- `local-backend` 连接本地 Express/MySQL。
+- `staging` 和 `production` 必须显式读取 `config/environments.json`，staging 未完成独立资源配置时构建会失败。
 
-## 常用命令
+微信开发者工具导入仓库根目录，实际运行目录为 `dist/`。主包只保留四个 Tab 页，其他业务页在 `subpackages` 分包。
+
+## 本地后端
 
 ```powershell
-npm run typecheck
-npm test
-npm run build
-npm run verify
+Copy-Item server/env.local.example server/.env
+npm run dev:local-backend
 ```
 
-## 目录
+该命令依赖 Docker daemon。停止环境使用 `npm run local:down`。不要把 `.env` 或真实云密钥提交到仓库。
+
+## 发布
+
+```powershell
+npm run verify:production
+npm run release:build -- --release-id=2026.07.25-rc.2+<git-short-sha> --rollback-release-id=<previous-stable-release>
+```
+
+发布命令要求工作树干净，生成三个 ZIP、SHA-256 清单、CycloneDX SBOM、发布记录和回滚目标，输出到已忽略的 `artifacts/`。部署、数据库备份与回滚步骤见 [运维手册](docs/operations/release-and-rollback.md)。
+
+## 安全与运营边界
+
+生产自动迁移默认关闭；微信回调、COS 触发、订阅消息、指标和分析都是显式 capability。分析在用户同意前不收集，且不接收照片地址、Token、昵称、自由文本或业务对象 ID。
+
+当前可自动验证的代码状态与必须在真实云/真机完成的项目见 [优化执行状态](docs/operations/optimization-status.md)。
+
+## 关键目录
 
 ```text
-src/
-  assets/             贴纸开发素材
-  components/         小程序公共组件
-  pages/              页面与底部面板
-  services/           Mock API、持久化、埋点
-  types/              领域类型
-  utils/              业务日期与 ID
-tests/                日期、动效和 Alpha/Beta/RC 服务契约测试
-scripts/              构建及产物校验
-dist/                 微信开发者工具运行产物
+src/                         小程序源码
+server/                      Express/MySQL 后端
+cloudfunctions/              COS 事件转发函数
+config/                      环境与云基线（不含密钥）
+scripts/                     构建、审计、发布和漂移检查
+docs/adr/                    架构决策
+docs/operations/             发布、恢复、监控、验收与隐私手册
 ```
-
-## 阶段边界
-
-RC 已打通“多人记录 → 图片合集 → 提醒 → 删除回收/恢复 → 日终快照 → 公平月度回忆 → 保存相册 → 隐私与账号删除申请”。
-
-真实小程序码、微信订阅消息发送、云端分钟任务、数据库行锁、永久媒体清理和账户合规删除仍依赖正式 AppID 与服务端环境。本地适配器实现对应页面、数据结构、守卫、降级和可自动验证的状态规则，不伪造外部服务成功结果。

@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    groups: { miniprogram-dev-tools: { patterns: ["*"] } }
+  - package-ecosystem: npm
+    directory: /server
+    schedule: { interval: weekly }
+    groups: { backend-dependencies: { patterns: ["*"] } }
+  - package-ecosystem: npm
+    directory: /cloudfunctions/cos-media-trigger
+    schedule: { interval: weekly }
+    groups: { cos-trigger-dependencies: { patterns: ["*"] } }

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "mysqlCompatibility": "5.7",
+  "migrations": [
+    {
+      "file": "001_initial_schema.sql",
+      "sha256": "5b896651cc7707bf147d78535c05ad964180ea73933029363aef45cd8256ef39"
+    },
+    {
+      "file": "002_seed_templates.sql",
+      "sha256": "6701c4cd4ff49cf2281904e74dc3351caf4c02c5b242de97f6f148e7671438a2"
+    },
+    {
+      "file": "003_record_media_unique.sql",
+      "sha256": "469321e9ebffb098959a74fa6d83a8b7f3a7b51f2322e892fd137cb49c6ba21b"
+    },
+    {
+      "file": "004_operational_indexes.sql",
+      "sha256": "78abfc8e99b6151f7abefea2d959bea407442b2b167724b57e749084d505187d"
+    },
+    {
+      "file": "005_analytics_events.sql",
+      "sha256": "f05b2ab9e9897a21bb8bce12809b72dc05d8ec1648ce281418ad4f6f7a32ec7b"
+    }
+  ]
+}

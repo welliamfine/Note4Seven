@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config';
+import { productionEnvironment } from './fixtures/production-config';
 
 const base = {
   MYSQL_ADDRESS: 'db.internal:3307',
@@ -43,9 +44,21 @@ describe('loadConfig', () => {
   });
 
   it('rejects development authentication in production', () => {
-    expect(() => loadConfig({ ...base, NODE_ENV: 'production', ALLOW_DEV_AUTH: 'true' })).toThrow(
+    expect(() => loadConfig({ ...productionEnvironment, ALLOW_DEV_AUTH: 'true' })).toThrow(
       'ALLOW_DEV_AUTH must be false in production',
     );
+  });
+
+  it('requires production resources and explicit migration control', () => {
+    expect(() => loadConfig({ ...productionEnvironment, AUTO_MIGRATE: 'true' })).toThrow('AUTO_MIGRATE must be false');
+    expect(() => loadConfig({ ...base, NODE_ENV: 'production', AUTO_MIGRATE: 'false' })).toThrow('RELEASE_ID');
+    expect(loadConfig(productionEnvironment).autoMigrate).toBe(false);
+  });
+
+  it('requires capability-specific production configuration', () => {
+    expect(() => loadConfig({ ...productionEnvironment, ENABLE_STORAGE_EVENTS: 'true' })).toThrow('STORAGE_EVENT_TOKEN');
+    expect(() => loadConfig({ ...productionEnvironment, ENABLE_SUBSCRIPTIONS: 'true' })).toThrow('SUBSCRIBE_TEMPLATE_ID');
+    expect(() => loadConfig({ ...productionEnvironment, ENABLE_ANALYTICS: 'true' })).toThrow('ANALYTICS_HASH_SALT');
   });
 
   it('loads the optional COS event forwarding token', () => {

@@ -3,12 +3,10 @@ import { loadConfig } from '../src/config';
 import { AppError } from '../src/lib/errors';
 import { buildWechatOpenApiUrl } from '../src/services/cloudbase-token';
 import { WechatService } from '../src/services/wechat';
+import { productionEnvironment } from './fixtures/production-config';
 
 const productionConfig = loadConfig({
-  NODE_ENV: 'production',
-  MYSQL_ADDRESS: 'db.internal:3306',
-  MYSQL_USERNAME: 'app',
-  MYSQL_PASSWORD: 'secret',
+  ...productionEnvironment,
 });
 
 afterEach(() => {

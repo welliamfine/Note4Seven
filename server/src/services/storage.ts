@@ -52,6 +52,16 @@ export class StorageService {
     };
   }
 
+  async integrationReadiness(): Promise<{ status: 'ready' | 'local' | 'unavailable'; mode: string }> {
+    if (this.config.nodeEnv !== 'production') return { status: 'local', mode: 'filesystem' };
+    try {
+      await this.credentials();
+      return { status: 'ready', mode: 'temporary-credentials' };
+    } catch {
+      return { status: 'unavailable', mode: 'temporary-credentials' };
+    }
+  }
+
   async assertUploaded(objectKey: string, expectedSize: number): Promise<void> {
     if (this.config.nodeEnv !== 'production') return;
     try {

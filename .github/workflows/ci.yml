@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  miniprogram:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run lint
+      - run: node scripts/scan-secrets.mjs
+      - run: npm run typecheck
+      - run: npm run test:coverage
+      - run: npm run build:production
+      - run: node scripts/validate-project.mjs
+      - run: node scripts/validate-production.mjs
+      - run: npm sbom --omit=dev --sbom-format=cyclonedx > miniprogram.sbom.cdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: miniprogram-ci
+          path: |
+            dist
+            coverage
+            miniprogram.sbom.cdx.json
+          retention-days: 14
+
+  backend:
+    runs-on: ubuntu-24.04
+    services:
+      mysql:
+        image: mysql:5.7.44
+        env:
+          MYSQL_ROOT_PASSWORD: ci-local-password
+          MYSQL_DATABASE: record_life
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-local-password"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    defaults:
+      run:
+        working-directory: server
+    env:
+      NODE_ENV: test
+      APP_ENV: development
+      MYSQL_ADDRESS: 127.0.0.1:3306
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ci-local-password
+      MYSQL_DATABASE: record_life
+      AUTO_MIGRATE: "false"
+      ALLOW_DEV_AUTH: "true"
+      LOCAL_STORAGE_PATH: /tmp/note-my-life-ci-storage
+      LOCAL_PUBLIC_BASE_URL: http://127.0.0.1:8080
+      TEST_API_URL: http://127.0.0.1:8080/api/v1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run typecheck
+      - run: npm run test:coverage
+      - run: npm run openapi:check
+      - run: npm run migrations:check
+      - run: npm run migrate
+      - run: npm run migrate
+      - run: npm run db:check-invariants
+      - run: npm run build
+      - name: Run MySQL 5.7 business integration smoke
+        shell: bash
+        run: |
+          node dist/index.js >/tmp/note-my-life-backend.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then break; fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then cat /tmp/note-my-life-backend.log; exit 1; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8080/health >/dev/null || { cat /tmp/note-my-life-backend.log; exit 1; }
+          npm run test:integration || { cat /tmp/note-my-life-backend.log; exit 1; }
+      - run: npm sbom --omit=dev --sbom-format=cyclonedx > backend.sbom.cdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: backend-ci
+          path: |
+            server/dist
+            server/coverage
+            server/openapi/openapi.json
+            server/backend.sbom.cdx.json
+          retention-days: 14
+
+  cos-trigger:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: cloudfunctions/cos-media-trigger
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloudfunctions/cos-media-trigger/package-lock.json
+      - run: npm ci
+      - run: npm run verify
+      - run: npm sbom --omit=dev --sbom-format=cyclonedx > cos-trigger.sbom.cdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cos-trigger-ci
+          path: |
+            cloudfunctions/cos-media-trigger/index.js
+            cloudfunctions/cos-media-trigger/handler.js
+            cloudfunctions/cos-media-trigger/package.json
+            cloudfunctions/cos-media-trigger/package-lock.json
+            cloudfunctions/cos-media-trigger/cos-trigger.sbom.cdx.json
+          retention-days: 14

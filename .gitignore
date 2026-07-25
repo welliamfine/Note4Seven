@@ -5,6 +5,7 @@ dist/
 **/dist/
 coverage/
 artifacts/
+backups/
 *.log
 
 # Local and sensitive configuration. Safe templates are explicitly tracked.

@@ -420,13 +420,13 @@ Page({
   },
 
   openPrivacy() {
-    void wx.navigateTo({ url: '/pages/privacy/index' });
+    void wx.navigateTo({ url: '/subpackages/privacy/index' });
   },
 
-  openRecycleBin() { void wx.navigateTo({ url: '/pages/recycle-bin/index' }); },
+  openRecycleBin() { void wx.navigateTo({ url: '/subpackages/recycle-bin/index' }); },
 
   openNotifications() {
-    void wx.navigateTo({ url: '/pages/notifications/index' });
+    void wx.navigateTo({ url: '/subpackages/notifications/index' });
   },
 
   async loadTemplates() {
@@ -523,7 +523,7 @@ Page({
     }
     const moduleId = event.currentTarget.dataset.id as string;
     track('home_module_click', { moduleId });
-    void wx.navigateTo({ url: `/pages/module-detail/index?moduleId=${moduleId}` });
+    void wx.navigateTo({ url: `/subpackages/module-detail/index?moduleId=${moduleId}` });
   },
 
   async togglePin(event: WechatMiniprogram.TouchEvent) {
@@ -748,7 +748,7 @@ Page({
       this.setData({ createSubmitting: false });
       await this.dismissCreate();
       await this.loadHome();
-      void wx.navigateTo({ url: `/pages/module-detail/index?moduleId=${module.moduleId}&new=1` });
+      void wx.navigateTo({ url: `/subpackages/module-detail/index?moduleId=${module.moduleId}&new=1` });
     } catch (error) {
       const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
       const createError = code === 'WECHAT_TOKEN_NOT_READY'

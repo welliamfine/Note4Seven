@@ -68,16 +68,24 @@ const members = await ok(`/modules/${module.moduleId}/members`, { token: owner }
 assert.equal(members.activeMemberCount, 4);
 assert.equal(members.inviteAvailable, false);
 
+const imageBody = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgQIAK5G4WQAAAABJRU5ErkJggg==', 'base64');
 const media = await ok('/media', {
   method: 'POST', token: owner,
   body: {
     moduleId: module.moduleId,
-    purpose: 'record_photo', sourceType: 'camera', fileName: 'integration.jpg', mimeType: 'image/jpeg', fileSize: 1024,
+    purpose: 'record_photo', sourceType: 'camera', fileName: 'integration.png', mimeType: 'image/png', fileSize: imageBody.length,
     clientRequestId: `media_${run}`,
   },
 });
+const localUpload = await fetch(`${baseUrl}/dev-storage/upload?key=${encodeURIComponent(media.upload.cloudPath)}`, {
+  method: 'PUT',
+  headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/octet-stream' },
+  body: imageBody,
+});
+assert.equal(localUpload.status, 200, `local object upload failed: ${localUpload.status} ${await localUpload.text()}`);
 await ok(`/media/${media.mediaId}/upload-complete`, {
-  method: 'POST', token: owner, body: { etag: 'integration-etag', clientRequestId: `uploaded_${run}` },
+  method: 'POST', token: owner,
+  body: { etag: 'integration-etag', fileSize: imageBody.length, mimeType: 'image/png', width: 1, height: 1, clientRequestId: `uploaded_${run}` },
 });
 await waitFor(async () => {
   const state = await ok(`/media/${media.mediaId}`, { token: owner });

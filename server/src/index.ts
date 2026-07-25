@@ -11,27 +11,54 @@ import { startJobRunner } from './jobs/runner';
 import { LocalStorageService } from './services/local-storage';
 import { StorageService } from './services/storage';
 import { WechatService } from './services/wechat';
+import { MetricsRegistry } from './observability/metrics';
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = pino({ level: config.logLevel });
+  const metrics = new MetricsRegistry({ release_id: config.releaseId, environment: config.environment });
+  logger.info({
+    releaseId: config.releaseId,
+    environment: config.environment,
+    nodeEnv: config.nodeEnv,
+    cloudEnvId: config.cloudEnvId,
+    cloudService: config.cloudService,
+    objectBucket: config.objectBucket,
+    cosRegion: config.cosRegion,
+    autoMigrate: config.autoMigrate,
+    capabilities: config.capabilities,
+    secrets: {
+      databasePassword: Boolean(config.mysql.password),
+      wechatCallbackToken: Boolean(config.wechatCallbackToken),
+      storageEventToken: Boolean(config.storageEventToken),
+      metricsToken: Boolean(config.metricsToken),
+    },
+  }, 'configuration loaded');
   const { server, setHandler } = createSwitchableServer(startingRequestHandler);
   let pool: Pool | null = null;
-  let stopJobs = () => {};
+  let stopJobs: (timeoutMs?: number) => Promise<void> = async () => {};
   let shuttingDown = false;
 
-  const shutdown = (signal: string) => {
+  const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, 'shutting down');
-    stopJobs();
-    server.close(() => {
-      (pool?.end() ?? Promise.resolve()).finally(() => process.exit(0));
-    });
-    setTimeout(() => process.exit(1), 10_000).unref();
+    const forceExit = setTimeout(() => process.exit(1), 15_000);
+    forceExit.unref();
+    try {
+      const closeHttp = closeServer(server);
+      await stopJobs(10_000);
+      await closeHttp;
+      await pool?.end();
+      clearTimeout(forceExit);
+      process.exit(0);
+    } catch (error) {
+      logger.error({ err: error }, 'graceful shutdown failed');
+      process.exit(1);
+    }
   };
-  process.once('SIGTERM', () => shutdown('SIGTERM'));
-  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
+  process.once('SIGINT', () => void shutdown('SIGINT'));
 
   await listenServer(server, config.port, '0.0.0.0');
   logger.info({ port: config.port, env: config.nodeEnv }, 'server listening');
@@ -45,9 +72,9 @@ async function main(): Promise<void> {
       ? new StorageService(config)
       : new LocalStorageService(config);
     const wechat = new WechatService(config);
-    const jobs = startJobRunner({ pool, storage, wechat, config, logger, instanceId: randomUUID() });
+    const jobs = startJobRunner({ pool, storage, wechat, config, logger, metrics, instanceId: randomUUID() });
     stopJobs = jobs.stop;
-    const app = createApp({ config, pool, storage, wechat, logger, onMediaQueued: jobs.wake });
+    const app = createApp({ config, pool, storage, wechat, logger, metrics, onMediaQueued: jobs.wake });
     setHandler(app);
     logger.info({ port: config.port, env: config.nodeEnv }, 'server ready');
   } catch (error) {

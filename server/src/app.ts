@@ -8,7 +8,9 @@ import { AppError } from './lib/errors';
 import { isoWithShanghaiOffset } from './lib/time';
 import { optionalAuth } from './middleware/auth';
 import { requestContext } from './middleware/request-context';
+import { createRateLimiter } from './middleware/rate-limit';
 import { accountRoutes } from './routes/account';
+import { analyticsRoutes } from './routes/analytics';
 import { authRoutes } from './routes/auth';
 import { collaborationRoutes } from './routes/collaboration';
 import { devStorageRoutes } from './routes/dev-storage';
@@ -22,6 +24,7 @@ import { wechatEventRoutes } from './routes/wechat-events';
 import type { StorageService } from './services/storage';
 import { LocalStorageService } from './services/local-storage';
 import type { WechatService } from './services/wechat';
+import { metricsEndpoint, requestMetrics, type MetricsRegistry } from './observability/metrics';
 
 export interface ApplicationDependencies {
   config: AppConfig;
@@ -30,6 +33,7 @@ export interface ApplicationDependencies {
   wechat: WechatService;
   logger?: Logger;
   onMediaQueued?: () => void;
+  metrics?: MetricsRegistry;
 }
 
 export function createApp(dependencies: ApplicationDependencies) {
@@ -40,6 +44,7 @@ export function createApp(dependencies: ApplicationDependencies) {
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
   app.use(requestContext);
+  if (dependencies.metrics) app.use(requestMetrics(dependencies.metrics));
   app.use(pinoHttp({
     logger,
     customProps: (request) => ({ requestId: request.requestId }),
@@ -67,28 +72,43 @@ export function createApp(dependencies: ApplicationDependencies) {
   app.get('/health', async (_request, response) => {
     try {
       await pool.query('SELECT 1');
-      const wechatIntegration = await wechat.integrationReadiness();
+      const [wechatIntegration, storageIntegration] = await Promise.all([
+        wechat.integrationReadiness(),
+        storage.integrationReadiness(),
+      ]);
       response.json({
         status: 'ok',
+        releaseId: config.releaseId,
+        environment: config.environment,
         serverTime: isoWithShanghaiOffset(new Date()),
         integrations: {
           wechat: wechatIntegration.status,
           wechatMode: wechatIntegration.mode,
           wechatTokenFile: wechatIntegration.tokenFile,
+          storage: storageIntegration.status,
+          storageMode: storageIntegration.mode,
         },
       });
     } catch {
       response.status(503).json({ status: 'unavailable', serverTime: isoWithShanghaiOffset(new Date()) });
     }
   });
+  if (config.capabilities.metrics && dependencies.metrics) {
+    app.get('/metrics', metricsEndpoint(dependencies.metrics, config.metricsToken));
+  }
 
   app.use(express.text({ type: ['text/xml', 'application/xml'], limit: '1mb' }));
   app.use(express.json({ limit: '1mb' }));
-  app.use(storageEventRoutes(pool, storage, config, dependencies.onMediaQueued));
-  app.use(wechatEventRoutes(pool, config, dependencies.onMediaQueued));
+  if (config.capabilities.storageEvents) {
+    app.use(storageEventRoutes(pool, storage, config, dependencies.onMediaQueued));
+  }
+  if (config.capabilities.wechatCallback) {
+    app.use(wechatEventRoutes(pool, config, dependencies.onMediaQueued));
+  }
 
   const api = express.Router();
   api.use(optionalAuth(pool));
+  api.use(createRateLimiter());
   if (config.nodeEnv !== 'production' && storage instanceof LocalStorageService) {
     api.use(devStorageRoutes(storage));
   }
@@ -99,6 +119,7 @@ export function createApp(dependencies: ApplicationDependencies) {
   api.use(recordRoutes(pool, storage, wechat, dependencies.onMediaQueued));
   api.use(makeupRoutes(pool, wechat));
   api.use(accountRoutes(pool, config));
+  api.use(analyticsRoutes(pool, config, dependencies.metrics));
   api.use(viewRoutes(pool, storage));
   app.use('/api/v1', api);
 

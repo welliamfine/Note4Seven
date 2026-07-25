@@ -3,18 +3,32 @@
     "pages/home/index",
     "pages/memory/index",
     "pages/discover/index",
-    "pages/profile/index",
-    "pages/module-detail/index",
-    "pages/member-management/index",
-    "pages/invite-share/index",
-    "pages/invite-intro/index",
-    "pages/module-settings/index",
-    "pages/notifications/index",
-    "pages/module-todo/index",
-    "pages/module-gallery/index",
-    "pages/recycle-bin/index",
-    "pages/privacy/index"
+    "pages/profile/index"
   ],
+  "subPackages": [
+    {
+      "name": "features",
+      "root": "subpackages",
+      "pages": [
+        "module-detail/index",
+        "member-management/index",
+        "invite-share/index",
+        "invite-intro/index",
+        "module-settings/index",
+        "notifications/index",
+        "module-todo/index",
+        "module-gallery/index",
+        "recycle-bin/index",
+        "privacy/index"
+      ]
+    }
+  ],
+  "preloadRule": {
+    "pages/home/index": {
+      "network": "wifi",
+      "packages": ["features"]
+    }
+  },
   "window": {
     "navigationStyle": "custom",
     "backgroundColor": "#f9f8f3",

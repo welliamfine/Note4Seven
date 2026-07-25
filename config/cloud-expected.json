@@ -1,0 +1,22 @@
+{
+  "production": {
+    "appId": "wxa64faf2abab7e388",
+    "cloudEnvironmentId": "prod-d5g4tznceeecbaf39",
+    "service": "express-bonj",
+    "bucket": "7072-prod-d5g4tznceeecbaf39-1346314817",
+    "region": "ap-shanghai",
+    "databaseEngine": "mysql",
+    "databaseCompatibility": "5.7",
+    "minimumInstances": 1,
+    "healthPath": "/health",
+    "storageTrigger": {
+      "event": "cos:ObjectCreated:*",
+      "prefix": "media/",
+      "suffix": "/original.jpg"
+    }
+  },
+  "staging": {
+    "status": "TO_BE_CONFIGURED",
+    "mustDifferFromProduction": ["cloudEnvironmentId", "service", "bucket", "database"]
+  }
+}

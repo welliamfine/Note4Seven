@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "triggerType": "cos",
+  "event": "cos:ObjectCreated:*",
+  "filter": {
+    "prefix": "media/",
+    "suffix": "/original.jpg"
+  },
+  "bucket": "INJECT_PER_ENVIRONMENT",
+  "region": "INJECT_PER_ENVIRONMENT",
+  "retry": "platform-managed",
+  "deadLetter": "REVIEW_IN_CONSOLE"
+}

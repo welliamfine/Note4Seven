@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { z } from 'zod';
@@ -29,7 +29,7 @@ export function storageEventRoutes(
   const router = Router();
 
   router.post('/internal/storage/object-created', asyncRoute(async (request, response) => {
-    verifyEventToken(request.headers['x-storage-event-token'], config.storageEventToken);
+    verifyEventToken(request.headers['x-storage-event-token'], [config.storageEventToken, config.storageEventTokenPrevious]);
     const body = parseBody(objectCreatedBody, request);
     if (body.bucket !== config.objectBucket) throw new AppError('INVALID_STORAGE_EVENT', '存储事件来源不正确', 401);
 
@@ -71,12 +71,15 @@ export function storageEventRoutes(
   return router;
 }
 
-function verifyEventToken(value: string | string[] | undefined, expected: string | null): void {
-  if (!expected) throw new AppError('STORAGE_EVENT_NOT_CONFIGURED', '存储事件接收尚未配置', 503);
+export function verifyEventToken(value: string | string[] | undefined, expectedValues: Array<string | null>): void {
+  const configured = expectedValues.filter((item): item is string => Boolean(item));
+  if (configured.length === 0) throw new AppError('STORAGE_EVENT_NOT_CONFIGURED', '存储事件接收尚未配置', 503);
   const actual = Array.isArray(value) ? value[0] : value ?? '';
-  const actualBuffer = Buffer.from(actual);
-  const expectedBuffer = Buffer.from(expected);
-  if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) {
+  const actualBuffer = createHash('sha256').update(actual).digest();
+  const valid = configured.map((expected) => (
+    timingSafeEqual(actualBuffer, createHash('sha256').update(expected).digest())
+  )).some(Boolean);
+  if (!valid) {
     throw new AppError('INVALID_STORAGE_EVENT', '存储事件来源不正确', 401);
   }
 }

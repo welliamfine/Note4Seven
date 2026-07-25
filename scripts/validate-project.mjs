@@ -20,9 +20,9 @@ const sourceFiles = await walk(source);
 const failures = [];
 const allowedFontSizes = new Set([20, 24, 28, 32, 36]);
 const decorativeFontSizes = new Map([
-  ['pages/member-management/index.wxss', new Set([90])],
-  ['pages/invite-share/index.wxss', new Set([116])],
-  ['pages/invite-intro/index.wxss', new Set([124])],
+  ['subpackages/member-management/index.wxss', new Set([90])],
+  ['subpackages/invite-share/index.wxss', new Set([116])],
+  ['subpackages/invite-intro/index.wxss', new Set([124])],
 ]);
 const allowedFontWeights = new Set(['400', 'var(--font-weight-regular)']);
 const normalizeCssValue = (value) => value.replaceAll(/\s+/g, '').toLowerCase();
@@ -43,7 +43,7 @@ const textColorExceptions = new Map([
     '#48433e', '#6f6760', '#807970', '#c99491', '#c5a9a4', '#a49082', '#aaa29a', '#c2b4aa',
     'rgba(255,255,255,.78)',
   ])],
-  ['pages/module-detail/index.wxss', new Set(['#48433e', '#746e68', '#524d47', '#9a8c80', '#817a72'])],
+  ['subpackages/module-detail/index.wxss', new Set(['#48433e', '#746e68', '#524d47', '#9a8c80', '#817a72'])],
 ].map(([path, values]) => [path, new Set([...values].map(normalizeCssValue))]));
 
 for (const file of files.filter((item) => extname(item) === '.json')) {
@@ -55,7 +55,11 @@ for (const file of files.filter((item) => extname(item) === '.json')) {
 }
 
 const app = JSON.parse(await readFile(join(dist, 'app.json'), 'utf8'));
-for (const page of app.pages) {
+const allPages = [
+  ...app.pages,
+  ...(app.subPackages ?? []).flatMap((subpackage) => subpackage.pages.map((page) => `${subpackage.root}/${page}`)),
+];
+for (const page of allPages) {
   for (const extension of ['.js', '.json', '.wxml', '.wxss']) {
     try {
       await access(join(dist, `${page}${extension}`));
@@ -158,4 +162,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`Validated ${app.pages.length} pages, ${files.length} build artifacts, and all static asset references.`);
+console.log(`Validated ${allPages.length} pages, ${files.length} build artifacts, and all static asset references.`);

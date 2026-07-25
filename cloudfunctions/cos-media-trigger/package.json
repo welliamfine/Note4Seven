@@ -2,12 +2,26 @@
   "name": "cos-media-trigger",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "npm@11.16.0",
   "main": "index.js",
   "engines": {
-    "node": ">=18"
+    "node": ">=22 <23",
+    "npm": ">=11 <12"
+  },
+  "scripts": {
+    "syntax": "node --check index.js && node --check handler.js",
+    "test": "node --test tests/*.test.js",
+    "verify": "npm run syntax && npm test && npm audit --omit=dev --audit-level=high"
   },
   "dependencies": {
-    "@cloudbase/node-sdk": "3.18.3",
-    "ws": "8.21.1"
+    "@cloudbase/node-sdk": "3.18.3"
+  },
+  "overrides": {
+    "axios": "1.18.1",
+    "lodash.set": "npm:lodash@4.18.1",
+    "lodash.unset": "4.18.0"
+  },
+  "allowScripts": {
+    "core-js-pure": false
   }
 }

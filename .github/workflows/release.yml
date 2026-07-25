@@ -1,0 +1,41 @@
+name: Build release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: 2026.07.25-rc.2+<current-short-sha>; leave empty to derive
+        required: false
+      rollback_release_id:
+        description: Approved previous stable release ID
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+            cloudfunctions/cos-media-trigger/package-lock.json
+      - run: node scripts/install-all.mjs
+      - shell: bash
+        run: |
+          args=("--rollback-release-id=${{ inputs.rollback_release_id }}")
+          if [[ -n "${{ inputs.release_id }}" ]]; then args+=("--release-id=${{ inputs.release_id }}"); fi
+          node scripts/release.mjs "${args[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: controlled-release
+          path: artifacts
+          retention-days: 90

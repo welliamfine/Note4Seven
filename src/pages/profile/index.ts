@@ -99,10 +99,10 @@ Page({
     }
   },
   openPrivacy() {
-    void wx.navigateTo({ url: '/pages/privacy/index' });
+    void wx.navigateTo({ url: '/subpackages/privacy/index' });
   },
-  openRecycleBin() { void wx.navigateTo({ url: '/pages/recycle-bin/index' }); },
+  openRecycleBin() { void wx.navigateTo({ url: '/subpackages/recycle-bin/index' }); },
   openNotifications() {
-    void wx.navigateTo({ url: '/pages/notifications/index' });
+    void wx.navigateTo({ url: '/subpackages/notifications/index' });
   },
 });
