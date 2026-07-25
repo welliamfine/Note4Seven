@@ -70,7 +70,12 @@ for (const [name, directory] of [
   ['backend', join(root, 'server')],
   ['cos-media-trigger', join(root, 'cloudfunctions', 'cos-media-trigger')],
 ]) {
-  const result = spawnSync(npm, ['sbom', '--omit=dev', '--sbom-format=cyclonedx'], { cwd: directory, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+  const result = spawnSync(npm, ['sbom', '--omit=dev', '--sbom-format=cyclonedx'], {
+    cwd: directory,
+    encoding: 'utf8',
+    maxBuffer: 20 * 1024 * 1024,
+    shell: process.platform === 'win32',
+  });
   if (result.status !== 0) throw new Error(`${name} SBOM failed: ${result.stderr}`);
   const sbomPath = join(output, `${name}.sbom.cdx.json`);
   await writeFile(sbomPath, result.stdout);
@@ -84,7 +89,7 @@ const manifest = {
   gitCommit: commit,
   gitTag: `release-${releaseId}`,
   createdAt: new Date().toISOString(),
-  build: { node: process.version, npm: execFileSync(npm, ['--version'], { encoding: 'utf8' }).trim(), platform: `${process.platform}-${process.arch}` },
+  build: { node: process.version, npm: npmVersion(), platform: `${process.platform}-${process.arch}` },
   versions: { miniprogram: '0.3.0-rc.1', backend: '0.1.0', cosMediaTrigger: '1.0.0' },
   migrations,
   artifacts,
@@ -128,8 +133,20 @@ function git(args) {
 
 function run(command, args, cwd, label) {
   console.log(`[release] ${label}`);
-  const result = spawnSync(command, args, { cwd, stdio: 'inherit' });
-  if (result.status !== 0) throw new Error(`${label} failed with exit code ${result.status ?? 'unknown'}`);
+  const result = spawnSync(command, args, {
+    cwd,
+    stdio: 'inherit',
+    shell: process.platform === 'win32' && command.toLowerCase().endsWith('.cmd'),
+  });
+  if (result.status !== 0) {
+    throw new Error(`${label} failed with exit code ${result.status ?? 'unknown'}${result.error ? `: ${result.error.message}` : ''}`);
+  }
+}
+
+function npmVersion() {
+  const result = spawnSync(npm, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
+  if (result.status !== 0) throw new Error(`Unable to read npm version: ${result.stderr || result.error?.message || 'unknown error'}`);
+  return result.stdout.trim();
 }
 
 async function walk(directory) {
