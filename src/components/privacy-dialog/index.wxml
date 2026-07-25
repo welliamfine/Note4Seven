@@ -1,0 +1,16 @@
+<view wx:if="{{visible}}" class="privacy-mask">
+  <view class="privacy-dialog" role="dialog" aria-label="个人信息保护说明">
+    <text class="privacy-title">个人信息保护说明</text>
+    <text class="privacy-copy">使用头像、相机、相册和保存图片等功能前，需要你阅读并同意</text>
+    <button class="privacy-link" bindtap="openPrivacyContract">《小程序用户隐私保护指引》</button>
+    <view class="privacy-actions">
+      <button class="privacy-reject" bindtap="disagreePrivacyAuthorization">暂不同意</button>
+      <button
+        id="privacy-agree-button"
+        class="privacy-agree"
+        open-type="agreePrivacyAuthorization"
+        bindagreeprivacyauthorization="agreePrivacyAuthorization"
+      >同意并继续</button>
+    </view>
+  </view>
+</view>

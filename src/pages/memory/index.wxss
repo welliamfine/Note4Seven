@@ -1,0 +1,154 @@
+@import "../../styles/beta.wxss";
+
+.page-title {
+  padding: 92rpx 42rpx 22rpx;
+  font-size: var(--font-size-page-title);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-tight);
+}
+
+.memory-content {
+  padding: 0 36rpx 30rpx;
+}
+
+.weekly-card,
+.record-card {
+  border-radius: 54rpx;
+  background: rgba(255, 255, 255, .68);
+  box-shadow: 0 14rpx 34rpx rgba(78, 65, 52, .08);
+  backdrop-filter: blur(16px);
+}
+
+.weekly-card {
+  height: 368rpx;
+  padding: 28rpx 34rpx 30rpx;
+  box-sizing: border-box;
+  color: #48433e;
+}
+
+.card-kicker {
+  display: block;
+  color: #6f6760;
+  font-size: var(--font-size-secondary);
+}
+
+.weekly-grid {
+  height: 264rpx;
+  margin-top: 25rpx;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  row-gap: 0;
+}
+
+.weekly-grid > view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.metric-value {
+  font-family: Georgia, serif;
+  font-size: var(--font-size-page-title);
+  font-weight: var(--font-weight-regular);
+}
+
+.metric-label {
+  margin-top: 3rpx;
+  color: #807970;
+  font-size: var(--font-size-caption);
+}
+
+.record-card {
+  min-height: 610rpx;
+  margin-top: 30rpx;
+  padding: 34rpx 30rpx 28rpx;
+  box-sizing: border-box;
+  color: #48433e;
+  line-height: normal;
+}
+
+.record-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.record-heading > view {
+  display: flex;
+  flex-direction: column;
+}
+
+.record-word {
+  color: #c99491;
+  font-family: Georgia, serif;
+  font-size: 32rpx;
+}
+
+.record-month {
+  margin-top: 4rpx;
+  color: #c5a9a4;
+  font-size: 20rpx;
+}
+
+.record-heading button {
+  height: 52rpx;
+  margin: 0;
+  padding: 0 18rpx;
+  border-radius: 26rpx;
+  background: rgba(241, 231, 224, .75);
+  color: #a49082;
+  font-size: 24rpx;
+  line-height: 52rpx;
+}
+
+.memory-grid {
+  min-height: 306rpx;
+  margin-top: 20rpx;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3rpx 8rpx;
+}
+
+.memory-cell {
+  height: 148rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.memory-cell image {
+  width: 100%;
+  height: 100%;
+}
+
+.memory-empty {
+  grid-column: 1 / 5;
+  align-self: center;
+  color: #aaa29a;
+  font-size: 24rpx;
+  text-align: center;
+}
+
+.record-summary {
+  display: block;
+  margin: 14rpx 0 22rpx;
+  color: #c2b4aa;
+  font-size: 20rpx;
+  white-space: nowrap;
+}
+
+.save-button {
+  width: 100%;
+  height: 84rpx;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  border-radius: 34rpx;
+  background: rgba(203, 198, 191, .72);
+  color: rgba(255,255,255,.78);
+  font-size: 24rpx;
+  line-height: 84rpx;
+}
+.export-canvas { position:fixed; left:-2000px; top:0; width:750px; height:1000px; pointer-events:none; }
+.memory-select-overlay { z-index:140; }.memory-select-sheet { padding-bottom:calc(34rpx + env(safe-area-inset-bottom)); }.memory-month-selector { height:86rpx; display:grid; grid-template-columns:70rpx 1fr 70rpx; align-items:center; border-radius:30rpx; background:rgba(255,255,255,.46); }.memory-month-selector > view { width:70rpx; height:70rpx; display:flex; align-items:center; justify-content:center; }.memory-month-selector image { width:25rpx; height:25rpx; opacity:.66; }.memory-month-selector text { color:var(--text-color-primary); font-family:var(--font-family-data); font-size:var(--font-size-body); font-weight:var(--font-weight-regular); line-height:var(--line-height-normal); text-align:center; }.memory-module-options { margin-top:20rpx; display:flex; flex-direction:column; gap:12rpx; }.memory-module-options button { width:100%; height:76rpx; margin:0; display:flex; align-items:center; justify-content:center; border-radius:28rpx; background:rgba(255,255,255,.38); color:var(--text-color-primary); font-size:var(--font-size-secondary); font-weight:var(--font-weight-regular); line-height:var(--line-height-normal); }.memory-module-options button.selected { background:rgba(242,216,211,.72); color:var(--text-color-primary); }

@@ -1,0 +1,42 @@
+.discover-empty {
+  min-height: calc(100vh - 150rpx);
+  padding: 0 58rpx 80rpx;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.discover-icon {
+  width: 108rpx;
+  height: 108rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 34rpx;
+  background: rgba(255,255,255,.66);
+  box-shadow: 0 14rpx 30rpx rgba(79,66,53,.08);
+}
+
+.discover-icon image {
+  width: 46rpx;
+  height: 46rpx;
+  opacity: .68;
+}
+
+.discover-title {
+  margin-top: 34rpx;
+  color: var(--text-color-primary);
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-tight);
+}
+
+.discover-copy {
+  margin-top: 22rpx;
+  color: var(--text-color-muted);
+  font-size: var(--font-size-secondary);
+  line-height: var(--line-height-relaxed);
+}

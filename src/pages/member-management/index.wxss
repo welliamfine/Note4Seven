@@ -1,0 +1,10 @@
+@import "../../styles/beta.wxss";
+.invite-card { min-height:210rpx; padding:30rpx 34rpx; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; }
+.invite-card > view { display:flex; flex-direction:column; }
+.invite-title { color:var(--text-color-primary); font-size:var(--font-size-body); font-weight:var(--font-weight-regular); line-height:var(--line-height-normal); }
+.invite-count { margin-top:12rpx; color:var(--text-color-primary); font-family:var(--font-family-data); font-size:var(--font-size-page-title); font-weight:var(--font-weight-regular); line-height:var(--line-height-tight); }
+.invite-copy { margin-top:8rpx; color:var(--text-color-muted); font-size:var(--font-size-caption); line-height:var(--line-height-normal); }
+.leaf-decoration { font-size: 90rpx; transform:rotate(-12deg); }
+.invite-disabled { opacity:.5; }
+.member-name-line { display:flex; align-items:center; gap:10rpx; }
+.creator-note { display:block; margin:24rpx 12rpx; color:var(--text-color-muted); font-size:var(--font-size-caption); line-height:var(--line-height-relaxed); text-align:center; }

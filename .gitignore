@@ -1,0 +1,31 @@
+# Dependencies and generated output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+coverage/
+artifacts/
+*.log
+
+# Local and sensitive configuration. Safe templates are explicitly tracked.
+.env
+.env.*
+**/.env
+**/.env.*
+!server/.env.example
+!server/env.local.example
+project.private.config.json
+
+# Local state and operating-system files
+.DS_Store
+Thumbs.db
+server/.local-storage/
+*.sqlite
+*.sqlite3
+
+# Design sources and historical hand-built releases are externally archived.
+release/
+material/
+typestyle/
+mock_image/
+docs/*.fig

@@ -1,0 +1,42 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/memory/index",
+    "pages/discover/index",
+    "pages/profile/index",
+    "pages/module-detail/index",
+    "pages/member-management/index",
+    "pages/invite-share/index",
+    "pages/invite-intro/index",
+    "pages/module-settings/index",
+    "pages/notifications/index",
+    "pages/module-todo/index",
+    "pages/module-gallery/index",
+    "pages/recycle-bin/index",
+    "pages/privacy/index"
+  ],
+  "window": {
+    "navigationStyle": "custom",
+    "backgroundColor": "#f9f8f3",
+    "backgroundTextStyle": "dark"
+  },
+  "usingComponents": {
+    "privacy-dialog": "/components/privacy-dialog/index"
+  },
+  "tabBar": {
+    "custom": true,
+    "color": "#8a8c86",
+    "selectedColor": "#e3ada9",
+    "backgroundColor": "#f9f8f3",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "首页" },
+      { "pagePath": "pages/memory/index", "text": "回忆" },
+      { "pagePath": "pages/discover/index", "text": "发现" },
+      { "pagePath": "pages/profile/index", "text": "我的" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

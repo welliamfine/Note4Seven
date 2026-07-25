@@ -1,0 +1,33 @@
+<view class="page-shell memory-page">
+  <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+  <view class="page-title content-layer">回忆</view>
+  <view class="memory-content content-layer">
+    <view class="weekly-card">
+      <text class="card-kicker">本周概览</text>
+      <view class="weekly-grid">
+        <view><text class="metric-value">{{recordedDays}}</text><text class="metric-label">记录天数</text></view>
+        <view><text class="metric-value">{{moduleCount}}</text><text class="metric-label">参与模块</text></view>
+        <view><text class="metric-value">{{weeklyJointCompleted}}</text><text class="metric-label">共同完成</text></view>
+        <view><text class="metric-value">{{streakDays}}</text><text class="metric-label">连续天数</text></view>
+        <view><text class="metric-value">{{weeklyReceivedReactions}}</text><text class="metric-label">收到回应</text></view>
+        <view><text class="metric-value">{{recordCount}}</text><text class="metric-label">本周记录</text></view>
+      </view>
+    </view>
+
+    <view class="record-card">
+      <view class="record-heading">
+        <view bindtap="openSelection"><text class="record-word">RECORD</text><text class="record-month">{{moduleName || '本月记录'}} · {{monthLabel}}</text></view>
+        <button bindtap="changeGroup">换一组</button>
+      </view>
+      <view class="memory-grid">
+        <view class="memory-cell" wx:for="{{stickers}}" wx:key="id"><view class="sticker-pop-wrapper {{stickerPhase}}" style="animation-delay: {{stickerPhase === 'sticker-entering' ? item.popDelay : 0}}ms;"><image class="sticker-outline-medium" src="{{item.path}}" mode="aspectFit" webp /></view></view>
+        <view wx:if="{{!stickers.length}}" class="memory-empty">这个月还没有贴纸</view>
+      </view>
+      <text class="record-summary">共同完成 {{jointCompleted}} 天　·　收到回应 {{receivedReactions}} 次　·　最常 {{mostUsedEmoji}}</text>
+      <button class="save-button" loading="{{exporting}}" bindtap="saveCard">保存到相册</button>
+      <canvas canvas-id="memoryExportCanvas" class="export-canvas"></canvas>
+    </view>
+  </view>
+</view>
+<view wx:if="{{selectionOpen}}" class="beta-overlay memory-select-overlay sheet-motion-overlay {{selectionClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeSelection"><view class="beta-sheet memory-select-sheet sheet-motion-panel {{selectionClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">选择模块和月份</text><view class="memory-month-selector"><view bindtap="previousMonth"><image src="/assets/ui/icons/chevron-left.svg" /></view><text>{{monthLabel}}</text><view bindtap="nextMonth"><image src="/assets/ui/icons/chevron-right.svg" /></view></view><view class="memory-module-options"><button class="{{moduleId === item.moduleId ? 'selected' : ''}}" wx:for="{{modules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtap="selectModule">{{item.name}}</button></view></view></view>
+<privacy-dialog />

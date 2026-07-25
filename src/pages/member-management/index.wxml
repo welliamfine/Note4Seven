@@ -1,0 +1,27 @@
+<view class="page-shell beta-page" style="padding-top:{{statusBarHeight}}px;">
+  <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" />
+  <view class="beta-topbar content-layer">
+    <text class="brand-script beta-brand">NoteMyLife</text>
+    <view class="beta-heading"><view class="beta-back" bindtap="goBack"><image src="/assets/ui/icons/chevron-left.svg" /></view><text class="beta-heading-title">成员管理</text><view></view></view>
+  </view>
+  <scroll-view class="beta-scroll content-layer" scroll-y enhanced show-scrollbar="{{false}}">
+    <view wx:if="{{loading}}" class="beta-loading">正在加载...</view>
+    <view wx:elif="{{view}}" class="beta-body">
+      <view class="invite-card beta-glass {{view.inviteAvailable ? '' : 'invite-disabled'}}" bindtap="openInvite">
+        <view><text class="invite-title">当前成员</text><text class="invite-count">{{view.members.length}}/{{view.memberLimit}}人</text><text class="invite-copy">邀请卡片有效期24小时</text></view>
+        <text class="leaf-decoration">🌿</text>
+      </view>
+      <text class="beta-section-title">成员列表</text>
+      <view class="member-list beta-glass">
+        <view class="beta-row" wx:for="{{view.members}}" wx:key="memberInstanceId" data-id="{{item.memberInstanceId}}" bindtap="selectMember">
+          <view class="beta-avatar" style="background:{{item.avatarColor}};"><image wx:if="{{item.avatarUrl}}" src="{{item.avatarUrl}}" mode="aspectFill" /><text wx:else>{{item.avatarText}}</text></view>
+          <view class="beta-row-copy"><view class="member-name-line"><text class="beta-row-title">{{item.isMine ? '我' : item.nickname}}</text><text wx:if="{{item.role === 'creator'}}" class="beta-tag">创建者</text></view><text class="beta-row-subtitle">{{item.role === 'creator' ? '创建于' : '加入于'}} {{item.joinedDate}}</text></view>
+          <text class="{{item.recordedToday ? 'beta-status-good' : 'beta-status-muted'}}">{{item.recordedToday ? '今日已记录' : '今日未记录'}}</text>
+        </view>
+      </view>
+      <text wx:if="{{view.currentRole === 'creator'}}" class="creator-note">创建者不能直接退出，请先转让创建者身份或删除模块。</text>
+    </view>
+  </scroll-view>
+  <view wx:if="{{actionOpen}}" class="beta-overlay sheet-motion-overlay {{actionClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeActions"><view class="beta-sheet sheet-motion-panel {{actionClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">对「{{selectedMemberName}}」的操作</text><view class="beta-sheet-actions"><button class="beta-secondary" bindtap="transferCreator">转让创建者</button><button class="beta-danger" bindtap="removeMember">移出模块</button></view></view></view>
+</view>
+<privacy-dialog />

@@ -1,0 +1,39 @@
+{
+  "name": "note-my-life-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "记录我的一辈子 - 微信云托管生产后端",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "migrate": "tsx src/db/migrate-cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:integration": "node scripts/integration-smoke.mjs",
+    "deploy:prod": "npx --yes --package=@cloudbase/cli@3.6.4 tcb -e prod-d5g4tznceeecbaf39 cloudrun deploy --serviceName express-bonj --port 8080 --source . --force",
+    "verify": "npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "cos-nodejs-sdk-v5": "^3.0.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.1.0",
+    "fast-xml-parser": "^5.10.1",
+    "helmet": "^8.1.0",
+    "mysql2": "^3.14.3",
+    "pino": "^9.7.0",
+    "pino-http": "^10.5.0",
+    "sharp": "^0.35.3",
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.16.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

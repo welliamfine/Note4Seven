@@ -1,0 +1,22 @@
+<view class="page-shell beta-page" style="padding-top:{{statusBarHeight}}px;">
+  <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" />
+  <view class="beta-topbar content-layer"><text class="brand-script beta-brand">NoteMyLife</text><view class="beta-heading"><view class="beta-back" bindtap="goBack"><image src="/assets/ui/icons/chevron-left.svg" /></view><text class="beta-heading-title">模块设置</text><view></view></view></view>
+  <scroll-view class="beta-scroll content-layer" scroll-y enhanced show-scrollbar="{{false}}"><view class="beta-body">
+    <view wx:if="{{loading}}" class="beta-loading">正在加载...</view>
+    <block wx:elif="{{view}}">
+      <text class="beta-section-title">基础信息</text><view class="settings-form beta-glass"><input class="beta-input" value="{{name}}" maxlength="10" bindinput="onName" disabled="{{view.currentRole !== 'creator'}}" /><textarea class="beta-textarea" value="{{description}}" maxlength="200" auto-height bindinput="onDescription" disabled="{{view.currentRole !== 'creator'}}" /><button wx:if="{{view.currentRole === 'creator'}}" class="beta-secondary save-info" loading="{{saving}}" bindtap="save">保存基础信息</button></view>
+      <text class="beta-section-title">个人提醒</text>
+      <view class="reminder-card beta-glass">
+        <view class="reminder-row"><view><text>开启提醒</text></view><switch checked="{{reminderEnabled}}" color="#e3ada9" bindchange="onReminderEnabled" /></view>
+        <picker mode="time" value="{{reminderTime}}" bindchange="onReminderTime"><view class="reminder-row"><view><text>提醒时间</text></view><text class="reminder-value">{{reminderTime}}</text></view></picker>
+        <view class="reminder-row"><view><text>小程序内提醒</text></view><switch checked="{{inAppEnabled}}" color="#e3ada9" bindchange="onInAppEnabled" /></view>
+        <view class="reminder-row subscription-reminder-row" bindtap="explainExternalReminder"><view><text>微信订阅提醒</text></view><text class="settings-arrow">›</text></view>
+        <button class="beta-secondary reminder-save" loading="{{reminderSaving}}" bindtap="saveReminder">保存提醒</button>
+      </view>
+      <text class="beta-section-title">成员与邀请</text><view class="settings-list beta-glass"><view class="beta-row settings-option-row" bindtap="openInvite"><text class="settings-option-title">邀请成员</text><text class="settings-arrow">›</text></view></view>
+      <text class="beta-section-title">危险操作</text><view class="settings-list beta-glass"><button wx:if="{{view.currentRole === 'member'}}" class="beta-row exit-row" bindtap="exitModule"><text>退出模块</text></button><button wx:else class="beta-row exit-row" bindtap="openDelete"><text>删除模块</text></button></view>
+    </block>
+  </view></scroll-view>
+  <view wx:if="{{deleteOpen}}" class="beta-overlay sheet-motion-overlay {{deleteClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeDelete"><view class="beta-sheet sheet-motion-panel {{deleteClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">输入模块名称确认删除</text><text class="delete-hint">请输入“{{view.module.name}}”。删除后所有成员立即停止打卡，7天后永久清理。</text><input class="beta-input" value="{{deleteConfirmation}}" placeholder="模块名称" placeholder-class="text-placeholder" bindinput="onDeleteConfirmation" /><text wx:if="{{deleteError}}" class="delete-error">{{deleteError}}</text><button class="beta-danger delete-confirm" bindtap="confirmDelete">继续删除</button></view></view>
+</view>
+<privacy-dialog />

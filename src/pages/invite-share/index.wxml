@@ -1,0 +1,18 @@
+<view class="page-shell beta-page invite-page" style="padding-top:{{statusBarHeight}}px;">
+  <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" />
+  <view class="beta-topbar content-layer"><text class="brand-script beta-brand">NoteMyLife</text><view class="beta-heading"><view class="beta-back" bindtap="goBack"><image src="/assets/ui/icons/chevron-left.svg" /></view><text class="beta-heading-title">邀请你加入</text><view></view></view></view>
+  <scroll-view class="beta-scroll content-layer" scroll-y enhanced show-scrollbar="{{false}}"><view class="beta-body invite-body">
+    <view wx:if="{{loading}}" class="beta-loading">正在生成邀请...</view>
+    <view wx:elif="{{preview}}" class="invite-preview beta-glass">
+      <text class="invite-leaf">🌿</text>
+      <text class="invite-module-name">{{preview.module.name}}</text>
+      <text class="invite-description">{{preview.module.description || '一起认真记录生活里的小事'}}</text>
+      <view class="inviter-line"><view class="beta-avatar" style="background:{{preview.inviter.avatarColor}};"><image wx:if="{{preview.inviter.avatarUrl}}" src="{{preview.inviter.avatarUrl}}" mode="aspectFill" /><text wx:else>{{preview.inviter.avatarText}}</text></view><view><text>{{preview.inviter.nickname}}</text><text>邀请你一起记录</text></view></view>
+      <view class="invite-meta"><view><text>{{preview.memberCount}}/{{preview.memberLimit}}</text><text>当前成员</text></view><view><text>{{countdown}}</text><text>剩余有效时间</text></view></view>
+      <view class="qr-placeholder"><view class="qr-corner qr-a"></view><view class="qr-corner qr-b"></view><view class="qr-corner qr-c"></view><text>Note</text></view>
+    </view>
+  </view></scroll-view>
+  <view class="beta-fixed-action content-layer"><view class="invite-actions"><button class="beta-secondary invite-save-button" disabled="{{!preview || expired || saving}}" bindtap="saveInviteCard"><image src="/assets/ui/icons/download.svg" /><text>{{saving ? '正在保存' : '保存到相册'}}</text></button><button class="beta-primary" open-type="share" disabled="{{!preview || expired || saving}}" bindtap="shareTap">{{expired ? '邀请已过期' : '立刻分享'}}</button></view></view>
+  <canvas canvas-id="inviteExportCanvas" class="invite-export-canvas"></canvas>
+</view>
+<privacy-dialog />

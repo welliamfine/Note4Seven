@@ -1,0 +1,123 @@
+<view class="page-shell detail-page" style="padding-top: {{statusBarHeight}}px;">
+  <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+  <text class="brand-script detail-brand content-layer">NoteMyLife</text>
+
+  <view wx:if="{{loading}}" class="detail-loading content-layer"><view></view><view></view><view></view></view>
+  <view wx:elif="{{module}}" class="detail-content content-layer">
+    <view class="module-heading">
+      <view class="round-icon" bindtap="goBack" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="返回"><image src="/assets/ui/icons/chevron-left.svg" /></view>
+      <view class="module-copy"><text class="detail-module-name">{{module.name}}</text><text class="module-description">{{module.members.length}}人 · {{module.description || '一起认真记录生活'}}</text></view>
+      <button class="round-icon detail-share" open-type="share" disabled="{{module.members.length >= 4}}" bindtap="shareModuleTap" hover-class="control-pressed" hover-stay-time="80" aria-label="分享邀请"><image src="/assets/ui/icons/share-2.svg" /></button>
+      <view class="round-icon" bindtap="openSettings" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="模块设置"><image src="/assets/ui/icons/settings-2.svg" /></view>
+    </view>
+
+    <scroll-view scroll-y class="detail-main-scroll" enhanced show-scrollbar="{{false}}">
+      <view class="detail-scroll-body">
+        <scroll-view scroll-x class="member-scroll" enhanced show-scrollbar="false" bindtap="openMembers">
+          <view class="member-row">
+            <view class="member-item" wx:for="{{memberViews}}" wx:key="memberInstanceId">
+              <view class="member-avatar {{item.recordedToday ? '' : 'member-pending'}}" style="background: {{item.avatarColor}};"><image wx:if="{{item.avatarUrl}}" src="{{item.avatarUrl}}" mode="aspectFill" /><text wx:else>{{item.avatarText}}</text></view>
+              <text class="member-name">{{item.isMine ? '我' : item.nickname}}</text>
+              <text class="member-role">{{item.roleLabel}}</text>
+            </view>
+          </view>
+        </scroll-view>
+
+        <view class="calendar-section {{module.members.length === 1 ? 'solo-calendar' : 'group-calendar'}} {{monthTransitioning ? 'month-transitioning' : ''}}" bindtouchstart="onCalendarTouchStart" bindtouchend="onCalendarTouchEnd">
+          <view class="calendar-heading">
+            <view class="calendar-nav-button" bindtap="previousMonth" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="上个月"><image src="/assets/ui/icons/chevron-left.svg" /></view>
+            <view class="month-number-window"><text class="month-number {{monthNumberClass}}">{{currentMonthLabel}}</text></view>
+            <view class="calendar-nav-button" bindtap="nextMonth" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="下个月"><image src="/assets/ui/icons/chevron-right.svg" /></view>
+          </view>
+          <view class="weekdays"><text wx:for="{{['周一','周二','周三','周四','周五','周六','周日']}}" wx:key="*this">{{item}}</text></view>
+          <view id="month-calendar-grid" class="calendar-grid {{calendarTransitionClass}}" bindanimationend="onCalendarTransitionEnd">
+            <view class="calendar-cell {{item.inMonth ? '' : 'outside-month'}} {{item.isToday ? 'today-cell' : ''}} {{item.hasRecords ? 'recorded-cell' : ''}} {{(item.hasRecords || item.isToday) ? cellBackgroundPhase : ''}}" wx:for="{{calendar}}" wx:key="date" data-date="{{item.date}}" bindtap="openDate" hover-class="calendar-cell-pressed" hover-stay-time="80" role="button">
+              <text wx:if="{{!item.hasRecords || monthStickerPhase === 'sticker-hidden'}}" class="day-number">{{item.day}}</text>
+              <view wx:if="{{item.hasRecords}}" class="calendar-stickers">
+                <view class="calendar-sticker-position slot-{{record.slot}}" wx:for="{{item.records}}" wx:for-item="record" wx:key="recordId">
+                  <view class="sticker-pop-wrapper {{monthStickerPhase === 'sticker-leaving' && !record.exitVisible ? 'sticker-hidden' : monthStickerPhase}}" style="animation-delay: {{monthStickerPhase === 'sticker-entering' ? record.popDelay : 0}}ms;">
+                    <image class="calendar-sticker-content sticker-outline-small" src="{{record.stickerPath}}" mode="aspectFit" webp />
+                  </view>
+                </view>
+              </view>
+              <text wx:if="{{item.isToday}}" class="today-dot"></text>
+              <text wx:if="{{item.hasPendingMakeup}}" class="pending-clock">◷</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="quick-actions">
+          <button bindtap="openTodo"><image src="/assets/ui/icons/list-todo.svg" /><view><text class="quick-title">待办</text><text class="quick-copy">{{todoCount ? todoCount + '项待处理' : '暂无待办'}}</text></view><text wx:if="{{todoCount > 0}}" class="todo-badge {{todoBadgePhase}}">{{todoCount}}</text></button>
+          <button bindtap="openGallery"><view class="gallery-preview-position"><view class="sticker-pop-wrapper {{galleryHasSticker ? (monthStickerPhase === 'sticker-leaving' && !galleryExitVisible ? 'sticker-hidden' : monthStickerPhase) : 'sticker-hidden'}}" style="animation-delay: {{monthStickerPhase === 'sticker-entering' ? galleryStickerDelay : 0}}ms;"><image class="gallery-preview-content sticker-outline-small" src="{{galleryCover}}" mode="aspectFit" webp /></view></view><view><text class="quick-title">图片展示</text><text class="quick-copy">查看合集</text></view></button>
+        </view>
+
+        <view class="month-stats" bindtap="openMemory">
+          <view><text class="stats-number {{statsNumberClass}}">{{monthRecordCount}}天</text><text>本月打卡</text></view>
+          <view><text class="stats-number {{statsNumberClass}}">{{jointCompletedDays}}天</text><text>共同完成</text></view>
+          <view><text class="stats-number {{statsNumberClass}}">{{streakDays}}天</text><text>连续记录</text></view>
+          <view><text class="stats-number {{statsNumberClass}}">{{receivedReactionCount}}</text><text>收到回应</text></view>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+
+  <view wx:if="{{module && !loading}}" class="fixed-primary safe-bottom">
+    <button class="primary-button" bindtap="openTodayEditor">{{todayProcessingCheckinId ? '查看生成进度' : (todayRecord ? '编辑今日' : '记录今日')}}</button>
+  </view>
+
+  <view wx:if="{{dateSheetOpen}}" class="sheet-overlay sheet-motion-overlay {{dateSheetClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeDateSheet">
+    <view class="date-sheet safe-bottom sheet-motion-panel {{dateSheetClosing ? 'sheet-motion-closing' : ''}} {{dateSheetCompact ? 'future-date-sheet' : (dateRecords.length ? 'recorded-date-sheet' : 'empty-date-sheet')}} {{dateAction !== 'none' ? 'date-sheet-with-action' : ''}}" catchtap="stopPropagation">
+      <view class="sheet-handle"></view>
+      <view class="date-sheet-heading"><view><text class="date-title">{{selectedDateLabel}}</text><text class="date-status">{{dateRecords.length ? dateRecords.length + ' 条记录' : '还没有记录'}}</text></view><view class="sheet-close" bindtap="closeDateSheet" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="关闭"><image src="/assets/ui/icons/x.svg" /></view></view>
+      <scroll-view wx:if="{{dateRecords.length}}" scroll-y class="date-record-list">
+        <view class="date-record" wx:for="{{dateRecords}}" wx:key="recordId">
+          <view class="record-owner"><view class="record-avatar" style="background: {{item.ownerAvatarColor}};"><image wx:if="{{item.ownerAvatarUrl}}" src="{{item.ownerAvatarUrl}}" mode="aspectFill" /><text wx:else>{{item.ownerAvatarText}}</text></view><view><text>{{item.isMine ? '我' : item.ownerName}}</text><text>{{item.timeLabel}}</text></view></view>
+          <image class="record-photo sticker-outline-large" src="{{item.stickerPath}}" mode="aspectFit" webp />
+          <text wx:if="{{item.remark}}" class="record-remark">{{item.remark}}</text>
+          <view class="reaction-row"><view class="reaction-summary"><text wx:for="{{item.reactions}}" wx:for-item="reaction" wx:key="reactionId">{{reaction.emoji}}</text><text wx:if="{{!item.reactions.length}}">还没有回应</text></view><button wx:if="{{!item.isMine}}" data-record="{{item.recordId}}" bindtap="toggleReactionPicker">回应</button></view>
+          <view wx:if="{{reactionPickerRecordId === item.recordId}}" class="reaction-picker"><button wx:for="{{reactionOptions}}" wx:key="code" data-record="{{reactionPickerRecordId}}" data-emoji="{{item.code}}" bindtap="chooseReaction"><text>{{item.emoji}}</text><text>{{item.label}}</text></button></view>
+        </view>
+      </scroll-view>
+      <view wx:else class="date-empty"><text>{{dateMessage || '这一天还静悄悄的～'}}</text></view>
+      <text wx:if="{{dateRecords.length && dateMessage}}" class="date-message">{{dateMessage}}</text>
+      <button wx:if="{{dateAction !== 'none'}}" class="primary-button date-action" bindtap="onDatePrimaryAction">{{dateActionText}}</button>
+    </view>
+  </view>
+
+  <view wx:if="{{editorOpen}}" class="sheet-overlay editor-overlay sheet-motion-overlay {{editorClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeEditor">
+    <view class="editor-sheet safe-bottom sheet-motion-panel {{editorClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation">
+      <view class="sheet-handle"></view>
+      <view class="editor-heading"><text class="editor-title">{{editorTitle}}</text><view class="sheet-close" bindtap="closeEditor" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="关闭"><image src="/assets/ui/icons/x.svg" /></view></view>
+      <scroll-view scroll-y class="editor-content">
+        <text class="photo-label">今天的照片</text>
+        <view class="photo-stage {{editorMediaStatus === 'ready' ? 'photo-stage-ready' : ''}}" bindtap="openPhotoSource" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="添加或更换照片">
+          <view wx:if="{{editorMediaStatus === 'idle'}}" class="photo-placeholder"><image src="/assets/ui/icons/camera.svg" /><text>添加照片</text></view>
+          <view wx:if="{{editorMediaStatus === 'processing'}}" class="processing-view">
+            <image class="processing-icon" src="/assets/ui/icons/sparkles.svg" />
+            <text>正在生成贴纸</text>
+            <text class="processing-detail">{{editorMediaDetail}}</text>
+            <view wx:if="{{editorMediaProgress > 0 && editorMediaProgress < 100}}" class="progress-track"><view style="width:{{editorMediaProgress}}%;"></view></view>
+            <view wx:else class="processing-dots"><text></text><text></text><text></text></view>
+          </view>
+          <view wx:if="{{editorMediaStatus === 'ready'}}" class="ready-view"><view class="ready-sticker-motion"><view class="sticker-pop-wrapper {{editorStickerPhase}}"><image class="ready-sticker sticker-outline-large" src="{{editorStickerPath}}" mode="aspectFit" webp bindload="onEditorStickerLoad" binderror="onEditorStickerLoadError" /></view></view><view class="replace-pill"><image src="/assets/ui/icons/refresh-cw.svg" /><text>换一张</text></view></view>
+          <view wx:if="{{editorMediaStatus === 'failed'}}" class="photo-placeholder failed-view"><text>{{editorMediaErrorTitle}}</text><text>{{editorMediaError}}</text></view>
+        </view>
+        <button wx:if="{{editorMediaStatus === 'failed' && (editorMediaRetryable || editorOriginalPath)}}" class="retry-button" bindtap="retryMedia">重新生成</button>
+        <text class="remark-label">写点什么（可选）</text>
+        <textarea class="remark-input" maxlength="100" value="{{editorRemark}}" placeholder="今天发生了什么小事..." placeholder-class="text-placeholder" auto-height bindinput="onRemarkInput" />
+        <button wx:if="{{editorMode === 'edit'}}" class="delete-record" bindtap="deleteTodayRecord">删除今天的记录</button>
+      </scroll-view>
+      <button class="primary-button editor-submit" disabled="{{editorMediaStatus !== 'ready' || saving}}" loading="{{saving}}" bindtap="submitRecord">{{editorSubmitText}}</button>
+    </view>
+  </view>
+
+  <view wx:if="{{photoSourceOpen}}" class="source-overlay sheet-motion-overlay {{photoSourceClosing ? 'sheet-motion-closing' : ''}}" bindtap="closePhotoSource">
+    <view class="source-sheet safe-bottom sheet-motion-panel {{photoSourceClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation">
+      <view class="sheet-handle"></view>
+      <text class="source-title">添加照片</text>
+      <button data-source="camera" bindtap="choosePhoto"><image src="/assets/ui/icons/camera.svg" /><text>拍照</text></button>
+      <button data-source="album" bindtap="choosePhoto"><image src="/assets/ui/icons/image.svg" /><text>从相册选择</text></button>
+    </view>
+  </view>
+</view>
+<privacy-dialog />

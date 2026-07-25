@@ -1,0 +1,25 @@
+<view class="page-shell profile-page">
+  <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+  <view class="page-title content-layer">我的</view>
+  <view class="profile-state content-layer" wx:if="{{profileLoading}}">
+    <text>正在加载个人资料</text>
+  </view>
+  <view class="profile-state profile-state-error content-layer" wx:elif="{{profileLoadFailed}}">
+    <text class="profile-state-title">个人资料加载失败</text>
+    <text class="profile-state-detail">请检查网络后重试</text>
+    <button class="profile-retry-button" bindtap="retryProfile">重试</button>
+  </view>
+  <view class="profile-content content-layer" wx:elif="{{user}}">
+    <view class="identity-card" bindtap="openProfileEditor">
+      <view class="profile-avatar" style="background: {{user.avatarColor}};"><image wx:if="{{user.avatarUrl}}" src="{{user.avatarUrl}}" mode="aspectFill" /><text wx:else>{{user.avatarText}}</text></view>
+      <view class="identity-copy"><text class="nickname">{{user.nickname}}</text><text class="summary">已记录 {{recordedDays}} 天 · {{moduleCount}} 个模块</text></view><image class="profile-edit-icon" src="/assets/ui/icons/settings-2.svg" />
+    </view>
+    <view class="profile-menu">
+      <button bindtap="openNotifications"><image src="/assets/ui/icons/bell.svg" /><text>通知中心</text><text wx:if="{{unreadCount}}" class="badge">{{unreadCount}}</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
+      <button bindtap="openPrivacy"><image src="/assets/ui/icons/shield.svg" /><text>隐私与数据说明</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
+      <button bindtap="openRecycleBin"><image src="/assets/ui/icons/archive-restore.svg" /><text>模块回收站</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
+    </view>
+  </view>
+  <view wx:if="{{profileEditOpen}}" class="beta-overlay profile-edit-overlay sheet-motion-overlay {{profileEditClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeProfileEditor"><view class="beta-sheet profile-edit-sheet sheet-motion-panel {{profileEditClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">编辑个人资料</text><button class="profile-avatar-picker" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar"><view class="profile-avatar profile-draft-avatar" style="background: {{user.avatarColor}};"><image wx:if="{{profileDraftAvatarUrl}}" src="{{profileDraftAvatarUrl}}" mode="aspectFill" /><text wx:else>{{user.avatarText}}</text></view><text>更换头像</text></button><input class="beta-input profile-nickname-input" type="nickname" maxlength="20" value="{{profileDraftNickname}}" bindinput="onProfileNicknameInput" placeholder="请输入昵称" placeholder-class="text-placeholder" /><button class="beta-primary profile-save-button" loading="{{profileSaving}}" bindtap="saveProfile">保存资料</button></view></view>
+</view>
+<privacy-dialog />

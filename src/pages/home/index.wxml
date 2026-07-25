@@ -1,0 +1,176 @@
+<swiper class="primary-swiper" current="{{primaryTabIndex}}" duration="260" easing-function="easeInOutCubic" skip-hidden-item-layout="{{true}}" disable-touch="{{primaryTabIndex === 0 || cardGestureActive || createOpen}}" bindchange="onPrimarySwiperChange" bindanimationfinish="onPrimarySwiperAnimationFinish">
+  <swiper-item class="primary-swiper-item">
+<view class="page-shell home">
+  <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+  <view class="home-top" style="padding-top: {{statusBarHeight}}px;">
+    <view class="home-brand"><text class="brand-script">NoteMyLife</text><text>记录我的一辈子</text></view>
+    <view class="manage-pill" bindtap="toggleManage" hover-class="control-pressed" hover-stay-time="80" role="button">{{managing ? '完成' : '管理'}}</view>
+  </view>
+
+  <scroll-view class="home-module-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+
+  <view wx:if="{{loading}}" class="skeleton-list">
+    <view class="skeleton" wx:for="{{[1,2,3]}}" wx:key="*this"></view>
+  </view>
+
+  <view wx:elif="{{pinnedModules.length + normalModules.length === 0}}" class="empty-home">
+    <view class="empty-sticker"><view class="sticker-pop-wrapper {{homeStickerPhase}}"><image src="/assets/stickers/group-3.png" mode="aspectFit" /></view></view>
+    <text class="empty-title">从今天开始，留下一点生活</text>
+    <text class="empty-copy">一张照片，一个只属于你们的日历。</text>
+    <button class="primary-button empty-button" data-source="empty_primary" bindtap="openCreate">创建第一个记录</button>
+  </view>
+
+  <view wx:else class="module-groups" bindtouchstart="onHomeGapTouchStart" bindtouchend="onHomeGapTouchEnd">
+    <view wx:if="{{pinnedModules.length}}" class="module-group">
+      <view class="group-heading">
+        <text>置顶模块</text>
+        <view class="group-toggle" bindtap="togglePinnedGroup" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="展开或收起置顶模块"><image src="/assets/ui/icons/chevron-down.svg" class="group-chevron {{pinnedExpanded ? 'chevron-open' : ''}}" /></view>
+      </view>
+      <view class="group-list {{pinnedExpanded ? '' : 'group-list-collapsed'}} {{pinnedExpanding ? 'group-list-opening' : ''}} {{pinnedCollapsing ? 'group-list-closing' : ''}}" style="height: {{pinnedExpanded ? pinnedModules.length * 254 : 266}}rpx; --group-motion-duration: {{homeGroupMotionDuration}}ms; --group-opening-duration: {{homeGroupOpeningDuration}}ms; --group-card-opening-duration: {{homeGroupCardOpeningDuration}}ms;">
+        <view class="module-card collapse-order-{{index < 3 ? index : 'overflow'}} {{managing || revealedModuleId === item.moduleId ? 'action-open' : ''}}" style="--collapse-y: {{index === 0 ? 0 : (index === 1 ? -238 : 30 - index * 254)}}rpx; --expand-delay: {{(index < homeGroupOpeningMaxStaggerSteps ? index : homeGroupOpeningMaxStaggerSteps) * homeGroupOpeningStaggerStep}}ms;" wx:for="{{pinnedModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtouchstart="onCardTouchStart" bindtouchend="onCardTouchEnd" bindtouchcancel="onCardTouchCancel">
+          <view class="card-actions">
+            <button class="module-action pin-action" data-id="{{item.moduleId}}" data-pinned="true" catchtap="togglePin">取消置顶</button>
+            <button class="module-action delete-action" data-id="{{item.moduleId}}" catchtap="removeModule">删除</button>
+          </view>
+          <view class="module-card-content" data-id="{{item.moduleId}}" bindtap="openModule">
+            <view class="card-copy">
+              <text class="module-name">{{item.name}}</text>
+              <view class="avatar-stack">
+                <view class="mini-avatar" wx:for="{{item.members}}" wx:for-item="member" wx:key="memberInstanceId" style="background: {{member.avatarUrl ? 'transparent' : member.avatarColor}}; margin-left: {{index ? '-9rpx' : '0'}};"><image wx:if="{{member.avatarUrl}}" src="{{member.avatarUrl}}" mode="aspectFill" /><text wx:else>{{member.avatarText}}</text></view>
+              </view>
+            </view>
+            <view class="sticker-stack">
+              <view class="stack-sticker-position" wx:for="{{item.todayPreviewItems}}" wx:for-item="sticker" wx:key="recordId" style="right: {{sticker.displayOrder * 68}}rpx; z-index: {{4 - sticker.displayOrder}};">
+                <view class="sticker-pop-wrapper {{homeStickerPhase}}"><image class="stack-sticker-content sticker-outline-medium sticker-{{sticker.displayOrder}}" src="{{sticker.stickerPath}}" mode="aspectFit" webp /></view>
+              </view>
+              <text wx:if="{{!item.todayPreviewItems.length}}" class="quiet-label">今天还静悄悄</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{normalModules.length}}" class="module-group normal-group">
+      <view class="group-heading">
+        <text>普通模块</text>
+        <view class="group-toggle" bindtap="toggleNormalGroup" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="展开或收起普通模块"><image src="/assets/ui/icons/chevron-down.svg" class="group-chevron {{normalExpanded ? 'chevron-open' : ''}}" /></view>
+      </view>
+      <view class="group-list {{normalExpanded ? '' : 'group-list-collapsed'}} {{normalExpanding ? 'group-list-opening' : ''}} {{normalCollapsing ? 'group-list-closing' : ''}}" style="height: {{normalExpanded ? normalModules.length * 254 : 266}}rpx; --group-motion-duration: {{homeGroupMotionDuration}}ms; --group-opening-duration: {{homeGroupOpeningDuration}}ms; --group-card-opening-duration: {{homeGroupCardOpeningDuration}}ms;">
+        <view class="module-card collapse-order-{{index < 3 ? index : 'overflow'}} {{managing || revealedModuleId === item.moduleId ? 'action-open' : ''}}" style="--collapse-y: {{index === 0 ? 0 : (index === 1 ? -238 : 30 - index * 254)}}rpx; --expand-delay: {{(index < homeGroupOpeningMaxStaggerSteps ? index : homeGroupOpeningMaxStaggerSteps) * homeGroupOpeningStaggerStep}}ms;" wx:for="{{normalModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtouchstart="onCardTouchStart" bindtouchend="onCardTouchEnd" bindtouchcancel="onCardTouchCancel">
+          <view class="card-actions">
+            <button class="module-action pin-action" data-id="{{item.moduleId}}" data-pinned="false" catchtap="togglePin">置顶</button>
+            <button class="module-action delete-action" data-id="{{item.moduleId}}" catchtap="removeModule">删除</button>
+          </view>
+          <view class="module-card-content" data-id="{{item.moduleId}}" bindtap="openModule">
+            <view class="card-copy">
+              <text class="module-name">{{item.name}}</text>
+              <view class="avatar-stack">
+                <view class="mini-avatar" wx:for="{{item.members}}" wx:for-item="member" wx:key="memberInstanceId" style="background: {{member.avatarUrl ? 'transparent' : member.avatarColor}}; margin-left: {{index ? '-9rpx' : '0'}};"><image wx:if="{{member.avatarUrl}}" src="{{member.avatarUrl}}" mode="aspectFill" /><text wx:else>{{member.avatarText}}</text></view>
+              </view>
+            </view>
+            <view class="sticker-stack">
+              <view class="stack-sticker-position" wx:for="{{item.todayPreviewItems}}" wx:for-item="sticker" wx:key="recordId" style="right: {{sticker.displayOrder * 68}}rpx; z-index: {{4 - sticker.displayOrder}};">
+                <view class="sticker-pop-wrapper {{homeStickerPhase}}"><image class="stack-sticker-content sticker-outline-medium sticker-{{sticker.displayOrder}}" src="{{sticker.stickerPath}}" mode="aspectFit" webp /></view>
+              </view>
+              <text wx:if="{{!item.todayPreviewItems.length}}" class="quiet-label">今天还静悄悄</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  </scroll-view>
+</view>
+
+  <view wx:if="{{!loading && pinnedModules.length + normalModules.length > 0 && !managing}}" class="floating-add" data-source="floating" bindtap="openCreate" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="创建记录模块"><image src="/assets/ui/icons/plus.svg" /></view>
+
+  <view wx:if="{{createOpen}}" class="overlay sheet-motion-overlay {{createClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeCreate">
+    <view class="create-sheet safe-bottom sheet-motion-panel {{createClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation">
+      <view class="sheet-handle"></view>
+      <view class="sheet-heading"><text class="sheet-title">创建记录模块</text><view class="close-button" bindtap="closeCreate" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="关闭"><image src="/assets/ui/icons/x.svg" /></view></view>
+      <scroll-view scroll-y class="create-content">
+        <input class="text-input" maxlength="10" value="{{createName}}" placeholder="模块名称" placeholder-class="text-placeholder" bindinput="onNameInput" />
+        <textarea class="description-input" maxlength="200" value="{{createDescription}}" placeholder="介绍一下！" placeholder-class="text-placeholder" auto-height bindinput="onDescriptionInput" />
+        <view class="template-heading"><text>从模板开始</text></view>
+        <view class="template-pills">
+          <button class="template-pill {{selectedTemplateId === item.templateId ? 'template-selected' : ''}}" wx:for="{{templates}}" wx:key="templateId" data-id="{{item.templateId}}" bindtap="chooseTemplate">{{item.name}}</button>
+        </view>
+        <text wx:if="{{createError}}" class="form-error">{{createError}}</text>
+      </scroll-view>
+      <button class="primary-button create-submit" disabled="{{createSubmitting}}" loading="{{createSubmitting}}" bindtap="submitCreate">完成创建</button>
+    </view>
+  </view>
+  </swiper-item>
+
+  <swiper-item class="primary-swiper-item">
+    <scroll-view class="primary-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view class="page-shell memory-page">
+        <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+        <view class="page-title content-layer">回忆</view>
+        <view class="memory-content content-layer">
+          <view class="weekly-card">
+            <text class="card-kicker">本周概览</text>
+            <view class="weekly-grid">
+              <view><text class="metric-value">{{memoryRecordedDays}}</text><text class="metric-label">记录天数</text></view>
+              <view><text class="metric-value">{{memoryModuleCount}}</text><text class="metric-label">参与模块</text></view>
+              <view><text class="metric-value">{{memoryWeeklyJointCompleted}}</text><text class="metric-label">共同完成</text></view>
+              <view><text class="metric-value">{{memoryStreakDays}}</text><text class="metric-label">连续天数</text></view>
+              <view><text class="metric-value">{{memoryWeeklyReceivedReactions}}</text><text class="metric-label">收到回应</text></view>
+              <view><text class="metric-value">{{memoryRecordCount}}</text><text class="metric-label">本周记录</text></view>
+            </view>
+          </view>
+          <view class="record-card">
+            <view class="record-heading">
+              <view bindtap="openMemorySelection"><text class="record-word">RECORD</text><text class="record-month">{{memorySelectedModuleName || '本月记录'}} · {{memoryMonthLabel}}</text></view>
+              <button bindtap="changeMemoryGroup">换一组</button>
+            </view>
+            <view class="memory-grid">
+              <view class="memory-cell" wx:for="{{memoryStickers}}" wx:key="id"><view class="sticker-pop-wrapper {{memoryStickerPhase}}" style="animation-delay: {{memoryStickerPhase === 'sticker-entering' ? item.popDelay : 0}}ms;"><image class="sticker-outline-medium" src="{{item.path}}" mode="aspectFit" webp /></view></view>
+              <view wx:if="{{!memoryStickers.length}}" class="memory-empty">这个月还没有贴纸</view>
+            </view>
+            <text class="record-summary">共同完成 {{memoryJointCompleted}} 天　·　收到回应 {{memoryReceivedReactions}} 次　·　最常 {{memoryMostUsedEmoji}}</text>
+            <button class="save-button" loading="{{memoryExporting}}" bindtap="saveMemoryCard">保存到相册</button>
+            <canvas canvas-id="memoryExportCanvas" class="export-canvas"></canvas>
+          </view>
+        </view>
+      </view>
+    </scroll-view>
+  </swiper-item>
+
+  <swiper-item class="primary-swiper-item">
+    <scroll-view class="primary-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view class="page-shell discover-page">
+        <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+        <view class="discover-empty content-layer">
+          <view class="discover-icon"><image src="/assets/ui/icons/compass.svg" /></view>
+          <text class="discover-title">更多记录灵感即将上线</text>
+          <text class="discover-copy">想晒晒自己的打卡记录？想加入其他人的模板？<br />下一版本或许....</text>
+        </view>
+      </view>
+    </scroll-view>
+  </swiper-item>
+
+  <swiper-item class="primary-swiper-item">
+    <scroll-view class="primary-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view class="page-shell profile-page">
+        <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+        <view class="page-title content-layer">我的</view>
+        <view class="profile-content content-layer" wx:if="{{profileUser}}">
+          <view class="identity-card" bindtap="openProfileEditor">
+            <view class="profile-avatar" style="background: {{profileUser.avatarColor}};"><image wx:if="{{profileUser.avatarUrl}}" src="{{profileUser.avatarUrl}}" mode="aspectFill" /><text wx:else>{{profileUser.avatarText}}</text></view>
+            <view class="identity-copy"><text class="nickname">{{profileUser.nickname}}</text><text class="summary">已记录 {{profileRecordedDays}} 天 · {{profileModuleCount}} 个模块</text></view><image class="profile-edit-icon" src="/assets/ui/icons/settings-2.svg" />
+          </view>
+          <view class="profile-menu">
+            <button bindtap="openNotifications"><image src="/assets/ui/icons/bell.svg" /><text>通知中心</text><text wx:if="{{profileUnreadCount}}" class="badge">{{profileUnreadCount}}</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
+            <button bindtap="openPrivacy"><image src="/assets/ui/icons/shield.svg" /><text>隐私与数据说明</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
+            <button bindtap="openRecycleBin"><image src="/assets/ui/icons/archive-restore.svg" /><text>模块回收站</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
+          </view>
+        </view>
+      </view>
+    </scroll-view>
+  </swiper-item>
+</swiper>
+<view wx:if="{{memorySelectionOpen}}" class="beta-overlay memory-select-overlay sheet-motion-overlay {{memorySelectionClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeMemorySelection"><view class="beta-sheet memory-select-sheet sheet-motion-panel {{memorySelectionClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">选择模块和月份</text><view class="memory-month-selector"><view bindtap="previousMemoryMonth"><image src="/assets/ui/icons/chevron-left.svg" /></view><text>{{memoryMonthLabel}}</text><view bindtap="nextMemoryMonth"><image src="/assets/ui/icons/chevron-right.svg" /></view></view><view class="memory-module-options"><button class="{{memorySelectedModuleId === item.moduleId ? 'selected' : ''}}" wx:for="{{memoryModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtap="selectMemoryModule">{{item.name}}</button></view></view></view>
+<view wx:if="{{profileEditOpen}}" class="beta-overlay profile-edit-overlay sheet-motion-overlay {{profileEditClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeProfileEditor"><view class="beta-sheet profile-edit-sheet sheet-motion-panel {{profileEditClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">编辑个人资料</text><button class="profile-avatar-picker" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar"><view class="profile-avatar profile-draft-avatar" style="background: {{profileUser.avatarColor}};"><image wx:if="{{profileDraftAvatarUrl}}" src="{{profileDraftAvatarUrl}}" mode="aspectFill" /><text wx:else>{{profileUser.avatarText}}</text></view><text>更换头像</text></button><input class="beta-input profile-nickname-input" type="nickname" maxlength="20" value="{{profileDraftNickname}}" bindinput="onProfileNicknameInput" placeholder="请输入昵称" placeholder-class="text-placeholder" /><button class="beta-primary profile-save-button" loading="{{profileSaving}}" bindtap="saveProfile">保存资料</button></view></view>
+<privacy-dialog />

@@ -1,0 +1,9 @@
+<view class="page-shell discover-page">
+  <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+  <view class="discover-empty content-layer">
+    <view class="discover-icon"><image src="/assets/ui/icons/compass.svg" /></view>
+    <text class="discover-title">更多记录灵感即将上线</text>
+    <text class="discover-copy">想晒晒自己的打卡记录？想加入其他人的模板？<br />下一版本或许....</text>
+  </view>
+</view>
+<privacy-dialog />

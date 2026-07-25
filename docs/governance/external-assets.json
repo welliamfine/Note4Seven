@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "policy": "external-controlled-archive",
+  "generatedAt": "2026-07-25T16:04:05.801Z",
+  "storageLocation": "TO_BE_CONFIGURED_BY_REPOSITORY_ADMIN",
+  "assets": [
+    {
+      "path": "docs/打卡小程序原型图 (1).fig",
+      "bytes": 28955236,
+      "sha256": "20120f135abf8631bad962b98dbae8c7a31238f4896e9354aff956edddd7558a"
+    },
+    {
+      "path": "material/材质1.png",
+      "bytes": 4057225,
+      "sha256": "54ddd68de00137ddeb95ec7f64484222f54d1236562731ce822d67a77c279c90"
+    },
+    {
+      "path": "mock_image/Group 1.png",
+      "bytes": 103459,
+      "sha256": "cde9748ee102c89f483cae7a87ce83f11fe28b1fb300ef02b81e773b39413458"
+    },
+    {
+      "path": "mock_image/Group 12.png",
+      "bytes": 269489,
+      "sha256": "912405b2486ebbabc9d6244889bf34e4cd5c4a038b890e8648454b0ed151057c"
+    },
+    {
+      "path": "mock_image/Group 13.png",
+      "bytes": 499068,
+      "sha256": "5c5180e70e9b0ee542c87d16cc303b377571700c18042654b6993329efea61f6"
+    },
+    {
+      "path": "mock_image/Group 14.png",
+      "bytes": 1119134,
+      "sha256": "05e0a67ca65ba3907e8845d023d75fd64d0c7c2163e52a004f0fd324c23641f3"
+    },
+    {
+      "path": "mock_image/Group 15.png",
+      "bytes": 633736,
+      "sha256": "90b720e24c9e0ecc58bb3e2f3bb81a7e5f98d967fa1fca974485721a68075f6c"
+    },
+    {
+      "path": "mock_image/Group 3.png",
+      "bytes": 191520,
+      "sha256": "cb26a1d60c42f3f0ffd321559b631908c03f5ba83c82e87ac7680e95659aaf71"
+    },
+    {
+      "path": "mock_image/Group 4.png",
+      "bytes": 269615,
+      "sha256": "9587fba9671f62473dbf7a5f2cc730a199b14e09e6074cd8e3b054e07e69367f"
+    },
+    {
+      "path": "mock_image/Group 5.png",
+      "bytes": 360175,
+      "sha256": "def830b9e3c437c42c4d39ed636367e0b97e6effa495a200f65f8a5823482ec0"
+    },
+    {
+      "path": "release/prod-preview-v9.json",
+      "bytes": 130,
+      "sha256": "f6eb5e9d45fc008172027dece4c65832234a1cabedb5ffb94696fee31bd9cfed"
+    },
+    {
+      "path": "release/prod-preview-v9.png",
+      "bytes": 46847,
+      "sha256": "d401daed3f942af53e9bef4970b3de070c29b868d5089427faed42691b29e0a6"
+    },
+    {
+      "path": "release/prod-preview.json",
+      "bytes": 130,
+      "sha256": "b02ee4b089db9b8ed637e53fad775c7f95cac1967ac11c5323639ecaa9a161ff"
+    },
+    {
+      "path": "release/prod-preview.png",
+      "bytes": 46448,
+      "sha256": "3aedaef2c146a87ee0d32f330f18eaef866f69831d0198e1d282d0dd21028a8b"
+    },
+    {
+      "path": "release/record-life-backend-prod-v10.zip",
+      "bytes": 104157,
+      "sha256": "acc801701ec45db5268947337465496b6c5d084900b45ba5a6be108f2b279211"
+    },
+    {
+      "path": "release/record-life-backend-prod-v10b.zip",
+      "bytes": 108329,
+      "sha256": "62683267ae30ea6b4df38546a43ad13b75f82b97d28789d067f282afe338f913"
+    },
+    {
+      "path": "release/record-life-backend-prod-v10c.zip",
+      "bytes": 108326,
+      "sha256": "3de34e33195ba37f67848c962ee6ce8b6cbbc6ddc3d0473241078ecbf537d139"
+    },
+    {
+      "path": "release/record-life-backend-prod-v10d.zip",
+      "bytes": 123131,
+      "sha256": "8211f373fddd966e3ea0f06c61e4c285e7b1eb07b06f9d9067f3a60748442365"
+    },
+    {
+      "path": "release/record-life-backend-prod-v11-openapi-proxy.zip",
+      "bytes": 123420,
+      "sha256": "d78dd3d5f58bbdccb0c5a41541e6374d77608d23fe9833a7c96b0587dd736413"
+    },
+    {
+      "path": "release/record-life-backend-prod-v12-token-permissions.zip",
+      "bytes": 123972,
+      "sha256": "ce658a80c35dc6b14c5805832a520febba6e6b0f6c726ccac00aa98cc74fe370"
+    },
+    {
+      "path": "release/record-life-backend-prod-v13-https-openapi.zip",
+      "bytes": 123818,
+      "sha256": "cec0bbcf8bac0ada6d0306eed8e7818661c1ccca9e31b711ec39a3757a277071"
+    },
+    {
+      "path": "release/record-life-backend-prod-v14-force-https.zip",
+      "bytes": 123930,
+      "sha256": "3a6c45c298d6b4b52229c165f5f37a1f21738aa4fff7aef5b581cca4fe8b3996"
+    },
+    {
+      "path": "release/record-life-backend-prod-v15-cloudrun-http-proxy.zip",
+      "bytes": 124189,
+      "sha256": "b3d445cb26bace1764d0bf2b3f91bfc0826dce9971bf05faf921e6147f4085ff"
+    },
+    {
+      "path": "release/record-life-backend-prod-v16-openapi-diagnostics.zip",
+      "bytes": 117350,
+      "sha256": "464f94ae329c2a17e664398795894eed6f3177e58f439d229969f9c2954a959b"
+    },
+    {
+      "path": "release/record-life-backend-prod-v17-openapi-error-details.zip",
+      "bytes": 117411,
+      "sha256": "85ff6e9dfed0b796bd77d7041f114f0599428cb7d439546b672396df4df1a7ba"
+    },
+    {
+      "path": "release/record-life-backend-prod-v18-sticker-path-fix.zip",
+      "bytes": 105333,
+      "sha256": "615243ccb1b0b592476665668707b8493322f48da85f7ebe9c5b418a0537ec10"
+    },
+    {
+      "path": "release/record-life-backend-prod-v18b-sticker-path-fix.zip",
+      "bytes": 109504,
+      "sha256": "7b8547fe2eee0fbc3b13e91a5263e7ad401da59bef10a8d3ca6a11ffb9790582"
+    },
+    {
+      "path": "release/record-life-backend-prod-v18c-sticker-path-fix.zip",
+      "bytes": 109524,
+      "sha256": "ac9d31a2a4398b5a1f129cc87a727f487bce70703bf2443ad0eadcdb77324afc"
+    },
+    {
+      "path": "release/record-life-backend-prod-v19-cloudrun-message-push.zip",
+      "bytes": 109721,
+      "sha256": "65ce84ab4ceafcd0f858f945996563f0d79947341d2304be2ac3a5f6fbee8d60"
+    },
+    {
+      "path": "release/record-life-backend-prod-v20-cloudrun-push-compat.zip",
+      "bytes": 109910,
+      "sha256": "07032b48c8d292d4135df3cd26bf10338b92a84e10df14d51a989169baa75d6f"
+    },
+    {
+      "path": "release/record-life-backend-prod-v21-wechat-callback-context.zip",
+      "bytes": 110078,
+      "sha256": "527e8c7f0f4c9c560a3ebb416fdccd19cb1c5f184947cee509b8a5cf8a75a61b"
+    },
+    {
+      "path": "release/record-life-backend-prod-v22-media-performance.zip",
+      "bytes": 113570,
+      "sha256": "f4ed565590008912a2d95c1de72be1092292593811711ed8f23b2ef5270569ee"
+    },
+    {
+      "path": "release/record-life-backend-prod-v23-media-review-fix.zip",
+      "bytes": 115844,
+      "sha256": "c018634042e4607704e41fd90ba3cdfb470aaf63e06e5f19d87078b93c0fb690"
+    },
+    {
+      "path": "release/record-life-backend-prod-v24-media-fast-path.zip",
+      "bytes": 118184,
+      "sha256": "7141d951356e5c8cf86fe5e3ee92bccb166a008b182f7bb355e74346ebd5e120"
+    },
+    {
+      "path": "release/record-life-backend-prod-v25-upload-source-fix.zip",
+      "bytes": 118265,
+      "sha256": "057be367777c43275a043a65b795d04703344a55e97b67c192f0591b86ec9c49"
+    },
+    {
+      "path": "release/record-life-backend-prod-v26-cos-signature-expiry-fix.zip",
+      "bytes": 118339,
+      "sha256": "7190cd8c46038e7622831d46a6428f226d1caba1be8070936dfb69db6c598d1d"
+    },
+    {
+      "path": "release/record-life-backend-prod-v7.zip",
+      "bytes": 104268,
+      "sha256": "b473a8edede724a06ec6ceacb9e0ec91870005a420ffbbb972c3849dc6c13a40"
+    },
+    {
+      "path": "release/record-life-backend-prod-v8.zip",
+      "bytes": 104248,
+      "sha256": "9f6cdab66ac7222bcbc660d4e85447684e90a4468ec12379f7505b03e13d4155"
+    },
+    {
+      "path": "release/record-life-backend-prod-v9.zip",
+      "bytes": 100939,
+      "sha256": "58c081f84fcc24aba81e43fb8fefb8ef90624d478d87eb7238779fbc7829d7f1"
+    },
+    {
+      "path": "release/record-life-backend-prod-v9b.zip",
+      "bytes": 104968,
+      "sha256": "a29a54d78b36e59a8199f2885b0f058e5819516c47a3f966cc84f11481365ecf"
+    },
+    {
+      "path": "release/record-life-miniprogram-prod-v22-media-performance.zip",
+      "bytes": 1377818,
+      "sha256": "84db212505538ccf2160c014337c5c4a460c8876057dca68c3ade8858de68fcf"
+    },
+    {
+      "path": "typestyle/huiwen-mincho-alpha.woff2",
+      "bytes": 574884,
+      "sha256": "45cfbe57d749db8bd165bda78812cdcdd60636b3c4fbbe101ce1b78f36892d48"
+    },
+    {
+      "path": "typestyle/汇文明朝体.otf",
+      "bytes": 24426256,
+      "sha256": "1ea5d0450c0d034c3e4077f2b533d74fbd1bf1f14d938477389338e64d3d8d9c"
+    }
+  ]
+}
