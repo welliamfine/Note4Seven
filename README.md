@@ -4,7 +4,7 @@
 
 ## 环境要求
 
-- Node.js 22.x（见 `.nvmrc` 和 `.node-version`）
+- Node.js 22.23.1（见 `.nvmrc` 和 `.node-version`）
 - npm 11.x
 - 本地后端联调需 Docker Desktop 及 MySQL 5.7 容器
 - 真实云联调需已配置的 development/staging CloudBase 资源
