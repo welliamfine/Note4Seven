@@ -4,8 +4,8 @@
 
 | ID | 状态 | 本次交付/证据 | 未完成的外部动作 |
 |---|---|---|---|
-| P0-01 | 远程基线完成/分支保护受限 | GitHub `welliamfine/Note4Seven`、`main`、baseline/release tags、真实 `@welliamfine` CODEOWNER、秘密扫描 | 私有仓库当前套餐不支持分支保护；升级 GitHub Pro 或改为公开仓库后再启用 |
-| P0-02 | 完成 | Node/npm 锁定，三项目 `npm ci`，独立测试边界，`verify:all`，远程 CI run `30189967800` 全部通过 | 无 |
+| P0-01 | 完成 | 公开 GitHub 仓库、MIT License、`main`、baseline/release tags、真实 `@welliamfine` CODEOWNER、`Protect main` ruleset、私密漏洞报告 | 无 |
+| P0-02 | 完成 | Node/npm 锁定，三项目 `npm ci`，独立测试边界，`verify:all`，远程 CI run `30190494400` 全部通过 | 无 |
 | P0-03 | 模板完成/待取证 | 云 expected/actual 模板与漂移检查 | 控制台采集实际配置、日志和最近备份 |
 | P0-04 | 代码完成 | 同 release ID 的三 ZIP、hash、SBOM、manifest、notes、rollback target | 首次受控晋级/回滚记录 |
 | P0-05 | 代码完成 | COS handler 注入测试、输入校验、Token 轮换、错误向上传递、审计 0 high/critical | staging 部署并验证 SDK overrides 与真实触发 |
@@ -42,9 +42,10 @@ npm --prefix server run migrations:check
 ## 远程验证证据
 
 - 仓库：<https://github.com/welliamfine/Note4Seven>
-- 验证提交：`55ced315aa9696f02592d6f3d5c5dc8fcf016887`
-- CI run：<https://github.com/welliamfine/Note4Seven/actions/runs/30189967800>
+- 验证提交：`877be6bbc35997d62d2c225bdce1538e7a2fbd17`
+- CI run：<https://github.com/welliamfine/Note4Seven/actions/runs/30190494400>
 - 结果：`miniprogram`、`backend`、`cos-trigger` 全部成功；`backend` 使用 `mysql:5.7.44` 服务容器完成双次迁移、不变量和业务集成冒烟。
-- 仓库规则：GitHub API 返回“Upgrade to GitHub Pro or make this repository public to enable this feature”，当前私有仓库暂不能启用 ruleset/分支保护。
+- 仓库规则：<https://github.com/welliamfine/Note4Seven/rules/19757602>，要求 PR、线性历史、解决讨论并通过三个 CI 检查，禁止删除和强推；单维护者批准人数为 0。
+- 公开安全边界：MIT License、`SECURITY.md`、私密漏洞报告和依赖漏洞告警已启用。
 
 本机 Docker daemon 未运行，但远程 CI 的 MySQL 5.7 容器验证已经通过。CloudBase、真实 COS 触发和真机仍不得标记为已通过。
