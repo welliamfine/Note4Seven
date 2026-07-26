@@ -3,6 +3,12 @@ import { extname, join, relative } from 'node:path';
 
 const root = process.cwd();
 const dist = join(root, 'dist');
+const targetArgument = process.argv.find((item) => item.startsWith('--target-environment='));
+const targetEnvironment = targetArgument?.slice('--target-environment='.length) ?? 'production';
+if (!['staging', 'production'].includes(targetEnvironment)) {
+  throw new Error('Use --target-environment=staging or --target-environment=production');
+}
+const targetLabel = targetEnvironment === 'production' ? 'Production' : 'Staging';
 
 async function walk(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -37,7 +43,7 @@ const fileMetadata = new Map(await Promise.all(files.map(async (file) => [file, 
 const totalBytes = [...fileMetadata.values()]
   .reduce((sum, item) => sum + item.size, 0);
 if (totalBytes > MAX_TOTAL_BYTES) {
-  failures.push(`Production bundle is ${totalBytes} bytes; budget is ${MAX_TOTAL_BYTES} bytes`);
+  failures.push(`${targetLabel} bundle is ${totalBytes} bytes; budget is ${MAX_TOTAL_BYTES} bytes`);
 }
 const mainPackageBytes = [...fileMetadata.entries()]
   .filter(([file]) => !relative(dist, file).replaceAll('\\', '/').startsWith('subpackages/'))
@@ -49,23 +55,23 @@ for (const file of files) {
   const metadata = fileMetadata.get(file);
   if (!metadata) continue;
   if (metadata.size > MAX_SINGLE_FILE_BYTES) {
-    failures.push(`Production asset exceeds ${MAX_SINGLE_FILE_BYTES} bytes: ${relative(dist, file)} (${metadata.size})`);
+    failures.push(`${targetLabel} asset exceeds ${MAX_SINGLE_FILE_BYTES} bytes: ${relative(dist, file)} (${metadata.size})`);
   }
 }
 
 for (const artifact of forbiddenArtifacts) {
-  if (paths.has(artifact)) failures.push(`Production bundle contains local-only artifact: ${artifact}`);
+  if (paths.has(artifact)) failures.push(`${targetLabel} bundle contains local-only artifact: ${artifact}`);
 }
 for (const asset of forbiddenAssets) {
-  if (paths.has(asset)) failures.push(`Production bundle contains local-only or unused asset: ${asset}`);
+  if (paths.has(asset)) failures.push(`${targetLabel} bundle contains local-only or unused asset: ${asset}`);
 }
 
 const buildMetadata = JSON.parse(await readFile(join(dist, 'build-meta.json'), 'utf8'));
-if (buildMetadata.apiMode !== 'remote' || buildMetadata.targetEnvironment !== 'production') {
-  failures.push('Production bundle build-meta.json does not identify a remote production build');
+if (buildMetadata.apiMode !== 'remote' || buildMetadata.targetEnvironment !== targetEnvironment) {
+  failures.push(`${targetLabel} bundle build-meta.json does not identify a remote ${targetEnvironment} build`);
 }
 if (!buildMetadata.releaseId || buildMetadata.releaseId === 'development') {
-  failures.push('Production bundle is missing a release ID');
+  failures.push(`${targetLabel} bundle is missing a release ID`);
 }
 
 for (const file of files) {
@@ -93,4 +99,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`Validated production isolation and budgets (main=${mainPackageBytes}, features=${featurePackageBytes}, total=${totalBytes}) across ${files.length} artifacts.`);
+console.log(`Validated ${targetEnvironment} isolation and budgets (main=${mainPackageBytes}, features=${featurePackageBytes}, total=${totalBytes}) across ${files.length} artifacts.`);

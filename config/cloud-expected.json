@@ -1,22 +1,29 @@
 {
-  "production": {
+  "schemaVersion": 2,
+  "isolationKeys": ["cloudEnvironmentId", "service", "bucket", "database"],
+  "staging": {
+    "status": "configured",
     "appId": "wxa64faf2abab7e388",
     "cloudEnvironmentId": "prod-d5g4tznceeecbaf39",
     "service": "express-bonj",
+    "serviceStatus": "normal",
     "bucket": "7072-prod-d5g4tznceeecbaf39-1346314817",
     "region": "ap-shanghai",
+    "storageAcl": "private",
+    "database": "record_life",
+    "databaseStatus": "available",
     "databaseEngine": "mysql",
     "databaseCompatibility": "5.7",
     "minimumInstances": 1,
     "healthPath": "/health",
+    "storageTriggerStatus": "active",
     "storageTrigger": {
       "event": "cos:ObjectCreated:*",
       "prefix": "media/",
       "suffix": "/original.jpg"
     }
   },
-  "staging": {
-    "status": "TO_BE_CONFIGURED",
-    "mustDifferFromProduction": ["cloudEnvironmentId", "service", "bucket", "database"]
+  "production": {
+    "status": "TO_BE_CONFIGURED"
   }
 }

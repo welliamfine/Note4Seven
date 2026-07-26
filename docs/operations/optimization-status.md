@@ -6,12 +6,12 @@
 |---|---|---|---|
 | P0-01 | 完成 | 公开 GitHub 仓库、MIT License、`main`、baseline/release tags、真实 `@welliamfine` CODEOWNER、`Protect main` ruleset、私密漏洞报告 | 无 |
 | P0-02 | 完成 | Node/npm 锁定，三项目 `npm ci`，独立测试边界，`verify:all`，远程 CI run `30190494400` 全部通过 | 无 |
-| P0-03 | 模板完成/待取证 | 云 expected/actual 模板与漂移检查 | 控制台采集实际配置、日志和最近备份 |
+| P0-03 | 已取证/漂移待消除 | 云 expected/actual 模板与按环境漂移检查；`cloud-actual.2026-07-26.json` 已记录容器、私有存储、缺失数据库/触发器 | 补齐 staging 后复查实例规格、健康检查、日志和备份 |
 | P0-04 | 代码完成 | 同 release ID 的三 ZIP、hash、SBOM、manifest、notes、rollback target | 首次受控晋级/回滚记录 |
 | P0-05 | 代码完成 | COS handler 注入测试、输入校验、Token 轮换、错误向上传递、审计 0 high/critical | staging 部署并验证 SDK overrides 与真实触发 |
-| P0-06 | 代码完成/资源待配 | 显式环境构建、prod 默认值移除、capability 校验、日志脱敏 | 创建独立 staging 环境/服务/DB/COS/Token |
+| P0-06 | staging 部分就绪/待部署 | 现有未上线、无保留数据的环境、`express-bonj` 和私有 COS 已归类为 staging；production 配置留空并由门禁阻断 | staging 尚需 MySQL、服务环境变量/部署、COS 触发器；正式上线前再配置独立 production |
 | P0-07 | 代码/手册完成 | 显式迁移、5 个不变校验和、备份/隔离恢复命令、RPO/RTO 基线 | 真实备份恢复演练、账号分权、平台告警 |
-| P0-08 | 验收模板完成 | iOS/Android 矩阵、故障场景和证据字段 | staging 资源、真机、真实 `callContainer`/COS/微信联调 |
+| P0-08 | 验收模板完成 | iOS/Android 矩阵、故障场景和证据字段；staging 资源已确定 | staging 部署完成后进行真机、真实 `callContainer`/COS/微信联调 |
 | P0-09 | 代码完成 | 信任身份校验、回调 Token 轮换、IP/用户/模块/媒体维度限流和 429 | 云 WAF/网关全局限流、压测与 Token 实际轮换 |
 | P0-10 | 代码/手册完成 | API/media/outbox/job 指标、readiness、阈值、事故/演练模板 | 真实仪表盘、告警通道、轮值与演练截图 |
 | P1-01 | CI 完成/CD 待配置 | 固定 SHA 的 CI、MySQL 5.7 service、周审计、手工 release workflow、Dependabot；远程 run 全绿 | 仓库 secrets/environment approval、staging CD 与生产人工审批 |
@@ -33,7 +33,7 @@
 
 ```text
 npm run verify:all
-npm run verify:production
+npm run verify:production  # production 未配置期间应明确失败
 npm audit --audit-level=high (root/server/cloud function)
 npm --prefix server run openapi:check
 npm --prefix server run migrations:check

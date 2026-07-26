@@ -2,23 +2,46 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const actualArgument = process.argv.find((item) => item.startsWith('--actual='));
-if (!actualArgument) throw new Error('Usage: node scripts/check-cloud-drift.mjs --actual=<captured-cloud.json>');
+const environmentArgument = process.argv.find((item) => item.startsWith('--environment='));
+const targetEnvironment = environmentArgument?.slice('--environment='.length);
+if (!actualArgument || !['staging', 'production'].includes(targetEnvironment)) {
+  throw new Error('Usage: node scripts/check-cloud-drift.mjs --environment=<staging|production> --actual=<captured-cloud.json>');
+}
 const expected = JSON.parse(readFileSync(resolve('config/cloud-expected.json'), 'utf8'));
 const actual = JSON.parse(readFileSync(resolve(actualArgument.slice('--actual='.length)), 'utf8'));
 const differences = [];
-compare(expected.production, actual.production, 'production', differences);
-if (actual.staging?.status === 'TO_BE_CONFIGURED' || expected.staging.status === 'TO_BE_CONFIGURED') {
-  differences.push('staging: independent resources have not been captured/configured');
+
+if (expected.schemaVersion !== 2 || actual.schemaVersion !== 2) {
+  differences.push(`schemaVersion: expected 2 in both baseline and capture`);
+}
+
+const expectedTarget = expected[targetEnvironment];
+const actualTarget = actual[targetEnvironment];
+if (expectedTarget?.status !== 'configured') {
+  differences.push(`${targetEnvironment}: expected baseline is not configured`);
+} else if (actualTarget?.status !== 'configured') {
+  differences.push(`${targetEnvironment}: actual cloud resources have not been captured/configured`);
 } else {
-  for (const key of expected.staging.mustDifferFromProduction) {
-    if (actual.staging?.[key] === actual.production?.[key]) differences.push(`staging.${key}: must differ from production`);
+  compare(expectedTarget, actualTarget, targetEnvironment, differences);
+}
+
+const otherEnvironment = targetEnvironment === 'staging' ? 'production' : 'staging';
+if (expected[otherEnvironment]?.status === 'configured') {
+  if (actual[otherEnvironment]?.status !== 'configured') {
+    differences.push(`${otherEnvironment}: actual cloud resources have not been captured/configured`);
+  } else {
+    for (const key of expected.isolationKeys ?? []) {
+      if (actualTarget?.[key] === actual[otherEnvironment]?.[key]) {
+        differences.push(`${targetEnvironment}.${key}: must differ from ${otherEnvironment}`);
+      }
+    }
   }
 }
 if (differences.length) {
   process.stderr.write(`[cloud-drift] BLOCKED\n- ${differences.join('\n- ')}\n`);
   process.exitCode = 1;
 } else {
-  process.stdout.write(`[cloud-drift] captured configuration matches the expected baseline\n`);
+  process.stdout.write(`[cloud-drift] ${targetEnvironment} configuration matches the expected baseline\n`);
 }
 
 function compare(expectedValue, actualValue, path, differences) {

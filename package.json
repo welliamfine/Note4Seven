@@ -28,17 +28,18 @@
     "release:build": "node scripts/release.mjs",
     "cloud:check-drift": "node scripts/check-cloud-drift.mjs",
     "capacity:model": "node scripts/capacity-model.mjs",
-    "verify": "npm run lint && npm run typecheck && npm run test && npm run build && node scripts/validate-project.mjs",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build:staging && node scripts/validate-project.mjs && node scripts/validate-production.mjs --target-environment=staging",
     "verify:production": "npm run typecheck && npm run test && npm run build:production && node scripts/validate-project.mjs && node scripts/validate-production.mjs"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@vitest/coverage-v8": "4.1.10",
     "esbuild": "^0.25.0",
     "lucide-static": "^1.24.0",
     "miniprogram-api-typings": "^4.0.0",
     "sharp": "^0.35.3",
     "typescript": "^5.8.0",
-    "vitest": "4.1.10",
-    "@vitest/coverage-v8": "4.1.10"
+    "vitest": "4.1.10"
   },
   "allowScripts": {
     "esbuild@0.25.12": true
