@@ -30,11 +30,13 @@ if (apiMode === 'remote') {
     }
   }
 }
-if (targetEnvironment !== 'production') {
-  const production = environmentManifest.production;
+if (apiMode === 'remote' && targetEnvironment !== 'development') {
+  const otherEnvironmentName = targetEnvironment === 'staging' ? 'production' : 'staging';
+  const otherEnvironment = environmentManifest[otherEnvironmentName];
   for (const key of ['cloudEnvironmentId', 'cloudService', 'objectBucket']) {
-    if (environment[key] && environment[key] === production[key]) {
-      throw new Error(`${targetEnvironment}.${key} must not reference the production resource`);
+    const otherValue = otherEnvironment?.[key];
+    if (environment[key] && otherValue && !String(otherValue).startsWith('TO_BE_') && environment[key] === otherValue) {
+      throw new Error(`${targetEnvironment}.${key} must not reference the ${otherEnvironmentName} resource`);
     }
   }
 }

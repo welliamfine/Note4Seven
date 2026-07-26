@@ -29,7 +29,7 @@ npm run build:production
 
 - `mock` 仅用于本地 UI/交互验收，Mock 图片不会进入生产包。
 - `local-backend` 连接本地 Express/MySQL。
-- `staging` 和 `production` 必须显式读取 `config/environments.json`，staging 未完成独立资源配置时构建会失败。
+- `staging` 和 `production` 必须显式读取 `config/environments.json`。当前现有云资源作为 staging 使用；production 未配置，因此生产构建和发布会明确失败，直到上线前创建独立生产资源。
 
 微信开发者工具导入仓库根目录，实际运行目录为 `dist/`。主包只保留四个 Tab 页，其他业务页在 `subpackages` 分包。
 

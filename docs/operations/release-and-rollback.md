@@ -5,7 +5,7 @@
 ## 发布前门禁
 
 1. 工作树干净，候选提交已通过 CI，高危/严重依赖漏洞为 0。
-2. `config/cloud-actual.<date>.json` 由控制台采集，`npm run cloud:check-drift -- --actual=<file>` 通过。
+2. `config/cloud-actual.<date>.json` 由控制台采集，`npm run cloud:check-drift -- --environment=production --actual=<file>` 通过。
 3. staging 与 production 的环境、服务、数据库、COS 桶、Token 和最小实例独立。
 4. 对目标库完成发布前备份，记录 SHA-256、备份时间、库大小和恢复演练结果。
 5. 显式迁移在应用部署前完成，同一套迁移重复执行无副作用，不变量检查通过。
