@@ -27,9 +27,9 @@ jobs:
       - run: node scripts/scan-secrets.mjs
       - run: npm run typecheck
       - run: npm run test:coverage
-      - run: npm run build:staging
+      - run: npm run build:production
       - run: node scripts/validate-project.mjs
-      - run: node scripts/validate-production.mjs --target-environment=staging
+      - run: node scripts/validate-production.mjs
       - run: npm sbom --omit=dev --sbom-format=cyclonedx > miniprogram.sbom.cdx.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
