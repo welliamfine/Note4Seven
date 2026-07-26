@@ -1,8 +1,11 @@
 {
   "schemaVersion": 2,
-  "capturedAt": "2026-07-26T04:19:10-04:00",
-  "capturedBy": "CloudBase CLI 3.6.4",
+  "capturedAt": "2026-07-26T20:39:58+08:00",
+  "capturedBy": "CloudBase console and production health endpoint",
   "staging": {
+    "status": "TO_BE_CONFIGURED"
+  },
+  "production": {
     "status": "configured",
     "appId": "wxa64faf2abab7e388",
     "cloudEnvironmentId": "prod-d5g4tznceeecbaf39",
@@ -11,21 +14,12 @@
     "bucket": "7072-prod-d5g4tznceeecbaf39-1346314817",
     "region": "ap-shanghai",
     "storageAcl": "private",
-    "storageObjectCount": 120,
-    "database": "TO_BE_CONFIGURED",
-    "databaseStatus": "not-created",
-    "databaseEngine": "TO_BE_CONFIGURED",
-    "databaseCompatibility": "TO_BE_CONFIGURED",
-    "minimumInstances": "TO_BE_CAPTURED",
-    "healthPath": "TO_BE_CAPTURED",
-    "storageTriggerStatus": "not-created",
-    "storageTrigger": {
-      "event": "TO_BE_CONFIGURED",
-      "prefix": "TO_BE_CONFIGURED",
-      "suffix": "TO_BE_CONFIGURED"
-    }
-  },
-  "production": {
-    "status": "TO_BE_CONFIGURED"
+    "database": "record_life",
+    "databaseStatus": "available",
+    "databaseEngine": "mysql",
+    "databaseCompatibility": "5.7",
+    "minimumInstances": 1,
+    "healthPath": "/health",
+    "storageTriggerStatus": "disabled"
   }
 }

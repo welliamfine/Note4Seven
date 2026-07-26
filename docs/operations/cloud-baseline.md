@@ -2,7 +2,9 @@
 
 `config/cloud-expected.json` 是代码期望，`config/cloud-actual.example.json` 是控制台取证模板。它们不代表已核实真实云状态。
 
-当前小程序尚未发布且现有数据无需保留，因此原有 CloudBase 环境已重新归类为 staging。环境 ID 中保留的 `prod-` 是云平台历史名称，不代表该资源仍是生产环境。production 暂不配置，生产构建和发布会持续失败，直到上线前创建独立生产资源并完成取证。
+当前采用单生产环境模式：现有 CloudBase 环境、`express-bonj`、MySQL 和私有 COS 桶共同构成 production。独立 staging 暂未配置，不作为当前单维护者、未正式发布阶段的上线阻断项；需要多人协作、自动发布或破坏性演练前再建立完全隔离的 staging。
+
+COS 桶用于图片存储，必须保留。COS ObjectCreated 触发器属于可选加速链路，当前明确关闭；图片处理通过客户端上传完成后调用 `/media/:mediaId/upload-complete` 的核心链路触发。
 
 ## 采集范围
 
@@ -15,7 +17,7 @@
 将采集值写入一份不含密钥的日期文件后执行：
 
 ```powershell
-npm run cloud:check-drift -- --environment=staging --actual=config/cloud-actual.2026-07-26.json
+npm run cloud:check-drift -- --environment=production --actual=config/cloud-actual.2026-07-26.json
 ```
 
-目标环境的任何未采集值、与期望不一致或 staging/production 资源复用都会阻断晋级。production 尚未配置时，staging 漂移检查可以执行，但 production 漂移检查、构建和发布均会阻断。Token 与密码只记录“已配置/轮换日期”，不记录真实值。
+production 的任何未采集值或与期望不一致都会阻断发布。staging 配置完成后，检查器还会强制核对两套资源不能复用。Token 与密码只记录“已配置/轮换日期”，不记录真实值。

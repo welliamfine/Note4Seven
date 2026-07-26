@@ -9,19 +9,19 @@
     "subscribeTemplateId": ""
   },
   "staging": {
-    "appId": "wxa64faf2abab7e388",
-    "cloudEnvironmentId": "prod-d5g4tznceeecbaf39",
-    "cloudService": "express-bonj",
-    "objectBucket": "7072-prod-d5g4tznceeecbaf39-1346314817",
-    "cosRegion": "ap-shanghai",
-    "subscribeTemplateId": "fTNBBNLftez9i-ZcduqQ98r3az3IE2IZOWGLqnyUT5s"
-  },
-  "production": {
     "appId": "TO_BE_CONFIGURED",
     "cloudEnvironmentId": "TO_BE_CONFIGURED",
     "cloudService": "TO_BE_CONFIGURED",
     "objectBucket": "TO_BE_CONFIGURED",
     "cosRegion": "TO_BE_CONFIGURED",
     "subscribeTemplateId": "TO_BE_CONFIGURED"
+  },
+  "production": {
+    "appId": "wxa64faf2abab7e388",
+    "cloudEnvironmentId": "prod-d5g4tznceeecbaf39",
+    "cloudService": "express-bonj",
+    "objectBucket": "7072-prod-d5g4tznceeecbaf39-1346314817",
+    "cosRegion": "ap-shanghai",
+    "subscribeTemplateId": "fTNBBNLftez9i-ZcduqQ98r3az3IE2IZOWGLqnyUT5s"
   }
 }

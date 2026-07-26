@@ -22,11 +22,12 @@ function runDriftCheck(environment: 'staging' | 'production', actual: object) {
   ], { cwd: process.cwd(), encoding: 'utf8' });
 }
 
-const stagingCapture = {
+const productionCapture = {
   schemaVersion: 2,
   capturedAt: '2026-07-26T00:00:00Z',
   capturedBy: 'automated-test',
-  staging: {
+  staging: { status: 'TO_BE_CONFIGURED' },
+  production: {
     status: 'configured',
     appId: 'wxa64faf2abab7e388',
     cloudEnvironmentId: 'prod-d5g4tznceeecbaf39',
@@ -41,34 +42,28 @@ const stagingCapture = {
     databaseCompatibility: '5.7',
     minimumInstances: 1,
     healthPath: '/health',
-    storageTriggerStatus: 'active',
-    storageTrigger: {
-      event: 'cos:ObjectCreated:*',
-      prefix: 'media/',
-      suffix: '/original.jpg',
-    },
+    storageTriggerStatus: 'disabled',
   },
-  production: { status: 'TO_BE_CONFIGURED' },
 };
 
 describe('cloud configuration drift gate', () => {
-  it('accepts a captured staging environment that matches the baseline', () => {
-    const result = runDriftCheck('staging', stagingCapture);
+  it('accepts a captured production environment that matches the baseline', () => {
+    const result = runDriftCheck('production', productionCapture);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('staging configuration matches');
+    expect(result.stdout).toContain('production configuration matches');
   });
 
-  it('blocks production while its independent baseline is not configured', () => {
-    const result = runDriftCheck('production', stagingCapture);
+  it('blocks staging while its independent baseline is not configured', () => {
+    const result = runDriftCheck('staging', productionCapture);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('production: expected baseline is not configured');
+    expect(result.stderr).toContain('staging: expected baseline is not configured');
   });
 
-  it('blocks a staging capture that differs from the expected service', () => {
-    const actual = structuredClone(stagingCapture);
-    actual.staging.service = 'unexpected-service';
-    const result = runDriftCheck('staging', actual);
+  it('blocks a production capture that differs from the expected service', () => {
+    const actual = structuredClone(productionCapture);
+    actual.production.service = 'unexpected-service';
+    const result = runDriftCheck('production', actual);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('staging.service');
+    expect(result.stderr).toContain('production.service');
   });
 });

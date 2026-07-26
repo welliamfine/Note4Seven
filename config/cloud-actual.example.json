@@ -3,6 +3,9 @@
   "capturedAt": "TO_BE_CAPTURED",
   "capturedBy": "TO_BE_CAPTURED",
   "staging": {
+    "status": "TO_BE_CONFIGURED"
+  },
+  "production": {
     "status": "configured",
     "appId": "TO_BE_CAPTURED",
     "cloudEnvironmentId": "TO_BE_CAPTURED",
@@ -17,14 +20,6 @@
     "databaseCompatibility": "TO_BE_CAPTURED",
     "minimumInstances": "TO_BE_CAPTURED",
     "healthPath": "TO_BE_CAPTURED",
-    "storageTriggerStatus": "TO_BE_CAPTURED",
-    "storageTrigger": {
-      "event": "TO_BE_CAPTURED",
-      "prefix": "TO_BE_CAPTURED",
-      "suffix": "TO_BE_CAPTURED"
-    }
-  },
-  "production": {
-    "status": "TO_BE_CONFIGURED"
+    "storageTriggerStatus": "TO_BE_CAPTURED"
   }
 }
