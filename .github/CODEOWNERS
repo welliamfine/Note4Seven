@@ -1,10 +1,11 @@
-# Replace this placeholder with a real user or team before enabling required review.
-*                                      @repository-admin
-/src/                                  @miniprogram-maintainers
-/tests/                                @miniprogram-maintainers
-/server/src/                           @backend-maintainers
-/server/tests/                         @backend-maintainers
-/server/migrations/                    @database-maintainers
-/cloudfunctions/                       @cloud-maintainers
-/docs/*隐私*                           @privacy-reviewers
-/src/pages/privacy/                    @privacy-reviewers
+# Single-maintainer ownership. Keep required reviews disabled until a second reviewer exists.
+*                                      @welliamfine
+/src/                                  @welliamfine
+/tests/                                @welliamfine
+/server/src/                           @welliamfine
+/server/tests/                         @welliamfine
+/server/migrations/                    @welliamfine
+/cloudfunctions/                       @welliamfine
+/docs/operations/privacy-and-retention.md @welliamfine
+/src/components/privacy-dialog/        @welliamfine
+/src/subpackages/privacy/               @welliamfine
