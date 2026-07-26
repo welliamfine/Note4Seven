@@ -42,10 +42,11 @@ npm --prefix server run migrations:check
 ## 远程验证证据
 
 - 仓库：<https://github.com/welliamfine/Note4Seven>
-- 验证提交：`877be6bbc35997d62d2c225bdce1538e7a2fbd17`
-- CI run：<https://github.com/welliamfine/Note4Seven/actions/runs/30190494400>
+- 验证提交：`1f9c4f7900779dbca84ef34b9dc969d7c50d5439`
+- CI run：<https://github.com/welliamfine/Note4Seven/actions/runs/30190740517>
 - 结果：`miniprogram`、`backend`、`cos-trigger` 全部成功；`backend` 使用 `mysql:5.7.44` 服务容器完成双次迁移、不变量和业务集成冒烟。
 - 仓库规则：<https://github.com/welliamfine/Note4Seven/rules/19757602>，要求 PR、线性历史、解决讨论并通过三个 CI 检查，禁止删除和强推；单维护者批准人数为 0。
-- 公开安全边界：MIT License、`SECURITY.md`、私密漏洞报告和依赖漏洞告警已启用。
+- 保护流程实测：<https://github.com/welliamfine/Note4Seven/pull/3> 通过三个必需检查后以 squash 合并，合并后的 `main` CI 再次通过。
+- 公开安全边界：MIT License、`SECURITY.md`、私密漏洞报告、依赖漏洞告警/自动安全更新、秘密扫描和推送保护已启用。
 
 本机 Docker daemon 未运行，但远程 CI 的 MySQL 5.7 容器验证已经通过。CloudBase、真实 COS 触发和真机仍不得标记为已通过。
