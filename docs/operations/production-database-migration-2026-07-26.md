@@ -1,8 +1,8 @@
-# Staging 数据库迁移记录：2026-07-26
+# Production 数据库迁移记录：2026-07-26
 
 ## 范围
 
-- 环境：现有未发布的 CloudBase 环境，按项目决策归类为 staging。
+- 环境：production CloudBase 环境 `prod-d5g4tznceeecbaf39`。
 - 数据库：`record_life`，MySQL 5.7，`utf8mb4` / `utf8mb4_unicode_ci`。
 - 迁移：`004_operational_indexes.sql`、`005_analytics_events.sql`。
 - 变更性质：新增运营索引与 `analytics_event` 表，不删除或改写现有业务数据。
@@ -30,10 +30,11 @@
 | `005_analytics_events.sql` | `f05b2ab9e9897a21bb8bce12809b72dc05d8ec1648ce281418ad4f6f7a32ec7b` | 2026-07-26 17:28:56.471 | 成功 |
 
 `schema_migration` 已追平仓库中的 5 个迁移。迁移后从公网访问 `/health`，
-服务于 2026-07-26 17:29:47 +08:00 返回 `status: ok`。
+服务于 2026-07-26 17:29:47 +08:00 返回 `status: ok`。随后发布的
+`express-bonj-041` 于 21:01:29 +08:00 再次通过 `/health` 和核心业务冒烟。
 
 ## 尚未完成
 
 - 尚未执行隔离恢复演练，因此不能把备份标记为“已验证可恢复”。
-- 尚未在新版本 staging 服务中运行完整数据库不变量与业务 E2E。
-- 平台自动备份当前保留 7 天，低于手册建议的 14 天；上线前需完成保留期决策。
+- 完整故障场景和 iOS/Android 真机矩阵尚未执行；当前已完成开发者工具核心业务 E2E。
+- 平台自动备份当前保留 7 天；正式产生需保留的用户数据前需完成保留期决策。

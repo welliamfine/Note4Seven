@@ -1,14 +1,18 @@
 {
   "schemaVersion": 2,
-  "capturedAt": "2026-07-26T17:29:47+08:00",
-  "capturedBy": "CloudBase CLI 3.6.4, WeChat Cloud Hosting console, and DMC",
+  "capturedAt": "2026-07-26T21:01:29+08:00",
+  "capturedBy": "CloudBase CLI 3.6.4, WeChat Cloud Hosting console, DMC, and production health endpoint",
   "staging": {
+    "status": "TO_BE_CONFIGURED"
+  },
+  "production": {
     "status": "configured",
     "appId": "wxa64faf2abab7e388",
     "cloudEnvironmentId": "prod-d5g4tznceeecbaf39",
     "service": "express-bonj",
     "serviceStatus": "normal",
-    "serviceVersion": "express-bonj-034",
+    "serviceVersion": "express-bonj-041",
+    "releaseId": "2026.07.25-rc.3+a7de960368ad",
     "publicAccess": true,
     "containerCpuCores": 1,
     "containerMemoryGiB": 2,
@@ -41,17 +45,9 @@
     "minimumInstances": 1,
     "healthPath": "/health",
     "healthCheck": {
-      "capturedAt": "2026-07-26T17:29:47+08:00",
+      "capturedAt": "2026-07-26T21:01:29+08:00",
       "status": "ok"
     },
-    "storageTriggerStatus": "not-created",
-    "storageTrigger": {
-      "event": "TO_BE_CONFIGURED",
-      "prefix": "TO_BE_CONFIGURED",
-      "suffix": "TO_BE_CONFIGURED"
-    }
-  },
-  "production": {
-    "status": "TO_BE_CONFIGURED"
+    "storageTriggerStatus": "disabled"
   }
 }

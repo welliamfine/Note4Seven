@@ -15,7 +15,7 @@
     "build:staging": "node scripts/build.mjs --api-mode=remote --target-environment=staging",
     "build:production": "node scripts/build.mjs --api-mode=remote --target-environment=production",
     "dev": "npm run dev:mock",
-    "dev:cloud": "node scripts/build.mjs --watch --api-mode=remote --target-environment=staging",
+    "dev:cloud": "node scripts/build.mjs --watch --api-mode=remote --target-environment=production",
     "dev:mock": "node scripts/build.mjs --watch --api-mode=local --target-environment=development",
     "dev:local-backend": "node scripts/start-local-dev.mjs",
     "local:down": "docker compose -f server/docker-compose.dev.yml down",
@@ -28,7 +28,7 @@
     "release:build": "node scripts/release.mjs",
     "cloud:check-drift": "node scripts/check-cloud-drift.mjs",
     "capacity:model": "node scripts/capacity-model.mjs",
-    "verify": "npm run lint && npm run typecheck && npm run test && npm run build:staging && node scripts/validate-project.mjs && node scripts/validate-production.mjs --target-environment=staging",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build:production && node scripts/validate-project.mjs && node scripts/validate-production.mjs",
     "verify:production": "npm run typecheck && npm run test && npm run build:production && node scripts/validate-project.mjs && node scripts/validate-production.mjs"
   },
   "devDependencies": {

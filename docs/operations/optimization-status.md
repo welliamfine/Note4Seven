@@ -6,21 +6,21 @@
 |---|---|---|---|
 | P0-01 | 完成 | 公开 GitHub 仓库、MIT License、`main`、baseline/release tags、真实 `@welliamfine` CODEOWNER、`Protect main` ruleset、私密漏洞报告 | 无 |
 | P0-02 | 完成 | Node/npm 锁定，三项目 `npm ci`，独立测试边界，`verify:all`，远程 CI run `30190494400` 全部通过 | 无 |
-| P0-03 | 已取证/仅触发器漂移 | `cloud-actual.2026-07-26.json` 已记录容器规格、实例数、日志、健康检查、私有存储、MySQL 5.7、备份和迁移 | 创建并取证 staging COS ObjectCreated 触发器 |
-| P0-04 | 代码完成 | 同 release ID 的三 ZIP、hash、SBOM、manifest、notes、rollback target | 首次受控晋级/回滚记录 |
-| P0-05 | 代码完成 | COS handler 注入测试、输入校验、Token 轮换、错误向上传递、审计 0 high/critical | staging 部署并验证 SDK overrides 与真实触发 |
-| P0-06 | staging 基础资源就绪/待部署 | 现有未上线环境、`express-bonj`、私有 COS 与 `record_life` MySQL 5.7 已归类为 staging；production 留空并由门禁阻断 | 设置完整服务环境变量、部署新版本、创建 COS 触发器；上线前配置独立 production |
-| P0-07 | 迁移与备份已执行/待恢复演练 | 显式迁移、5 个不变校验和；手动快照成功；运行账号 DDL 被拒，维护账号执行 `004/005` 成功 | 隔离恢复演练、恢复后不变量/冒烟、备份保留期决策、平台告警 |
-| P0-08 | 验收模板完成 | iOS/Android 矩阵、故障场景和证据字段；staging 资源已确定 | staging 部署完成后进行真机、真实 `callContainer`/COS/微信联调 |
+| P0-03 | 完成 | production expected/actual 基线已与控制台、MySQL 和 `/health` 对齐，按环境漂移检查可执行 | 无 |
+| P0-04 | 已生产部署 | `2026.07.25-rc.3+a7de960368ad` 制品已部署为 `express-bonj-041`，线上健康正常，历史版本可回退 | 首次实际回滚演练可在出现独立 staging 后进行 |
+| P0-05 | 当前范围关闭 | COS handler 代码和测试保留；`ENABLE_STORAGE_EVENTS=false`，核心 `/upload-complete` 链路已通过 | 非上线必需，不再创建/排查 COS 触发器 |
+| P0-06 | production 完成 | 现有 CloudBase、`express-bonj`、MySQL 和私有 COS 已按真实用途登记为 production；构建/校验目标已对齐 | 独立 staging 在多人协作、自动发布或破坏性演练前再创建 |
+| P0-07 | 生产迁移/备份完成 | 001-005 迁移、校验和、生产前手动快照备份均成功；运行账号 DDL 被拒，维护账号执行 `004/005` 成功 | 隔离恢复演练延后到需要保留正式用户数据前 |
+| P0-08 | 核心冒烟完成 | 开发者工具已通过登录、数据库写入、单图直传、`upload-complete`、图片处理和首页显示 | 正式公开发布或扩大测试用户前补 iOS/Android 真机矩阵 |
 | P0-09 | 代码完成 | 信任身份校验、回调 Token 轮换、IP/用户/模块/媒体维度限流和 429 | 云 WAF/网关全局限流、压测与 Token 实际轮换 |
-| P0-10 | 代码/手册完成 | API/media/outbox/job 指标、readiness、阈值、事故/演练模板 | 真实仪表盘、告警通道、轮值与演练截图 |
+| P0-10 | 当前范围关闭 | 健康端点和结构化运行日志可用；`ENABLE_METRICS=false` | 指标/告警属于后续运营能力，不阻断当前上线 |
 | P1-01 | CI 完成/CD 待配置 | 固定 SHA 的 CI、MySQL 5.7 service、周审计、手工 release workflow、Dependabot；远程 run 全绿 | 仓库 secrets/environment approval、staging CD 与生产人工审批 |
-| P1-02 | 完成 | 前端 42、后端 47、函数 6 项测试，覆盖率门禁、远程 MySQL 5.7 容器中的迁移重放、不变量与业务集成冒烟 | 无 |
+| P1-02 | 完成 | 前端 45、后端 47、函数 6 项测试，覆盖率门禁、远程 MySQL 5.7 容器中的迁移重放、不变量与业务集成冒烟 | 无 |
 | P1-03 | 代码完成 | 四 Tab 主包+十页分包，移除未用字体/生产 Mock，主包/分包/总量预算 | 微信开发者工具首包时间与 14 页真机视觉回归 |
 | P1-04 | 代码完成 | AST 生成 74 operations 的 OpenAPI，漂移门禁和 ADR | 对外消费者合同测试证据 |
 | P1-05 | 模型/手册完成 | 容量计算命令、压测指标、故障注入与扩展阈值 | staging 真实压测/故障注入、成本账单和参数调整证据 |
 | P1-06 | 代码完成 | 优雅 drain、停止新工作、lease heartbeat、有界重试/dead letter、被动 Outbox 审计收敛 | staging 进程终止/租约丢失/重放演练 |
-| P1-07 | staging 迁移完成 | MySQL 5.7 CI、不变量、升级门禁；staging 已应用运营索引与分析事件表迁移 | staging `EXPLAIN`、数量基线和升级决策；production 上线前重放 |
+| P1-07 | production 迁移完成 | MySQL 5.7 CI、不变量、升级门禁；production 已应用运营索引与分析事件表迁移 | 运营数据形成后补 `EXPLAIN`、数量基线和升级决策 |
 | P1-08 | 部分完成 | 分包和已抽取的 motion/media/checkin 工具有独立测试 | 大页面与 local/remote API 全量按领域拆分需真机对照；本次不在无真机证据时做高风险改写 |
 | P1-09 | 代码/手册完成 | 同意门禁、批量/上限/退避/离线队列、禁止字段、HMAC userHash、90 天清理 | 真实仪表盘、与服务端事实对账的运营期数据 |
 | P1-10 | 代码/清单完成 | 个人数据清单、注销跨表/COS Outbox/匿名化/分析删除、备份再删除流程 | 法务批准、staging 完整删除报告、管理端最小权限复核 |
@@ -33,7 +33,8 @@
 
 ```text
 npm run verify:all
-npm run verify:production  # production 未配置期间应明确失败
+npm run verify:production
+npm run cloud:check-drift -- --environment=production --actual=config/cloud-actual.2026-07-26.json
 npm audit --audit-level=high (root/server/cloud function)
 npm --prefix server run openapi:check
 npm --prefix server run migrations:check
@@ -49,10 +50,10 @@ npm --prefix server run migrations:check
 - 保护流程实测：<https://github.com/welliamfine/Note4Seven/pull/3> 通过三个必需检查后以 squash 合并，合并后的 `main` CI 再次通过。
 - 公开安全边界：MIT License、`SECURITY.md`、私密漏洞报告、依赖漏洞告警/自动安全更新、秘密扫描和推送保护已启用。
 
-本机 Docker daemon 未运行，但远程 CI 的 MySQL 5.7 容器验证已经通过。CloudBase、真实 COS 触发和真机仍不得标记为已通过。
+本机 Docker daemon 未运行，但远程 CI 的 MySQL 5.7 容器验证已经通过。Production CloudBase 与开发者工具核心冒烟已通过；COS 触发器明确关闭且不属于核心链路，iOS/Android 真机矩阵仍未执行。
 
-## 真实 staging 数据库证据
+## 真实 production 数据库证据
 
-- 迁移记录：[`staging-database-migration-2026-07-26.md`](./staging-database-migration-2026-07-26.md)
+- 迁移记录：[`production-database-migration-2026-07-26.md`](./production-database-migration-2026-07-26.md)
 - `record_life` 已从 `003` 追平到 `005`，迁移前手动快照成功。
-- 迁移后的旧版在线服务 `/health` 返回 `status: ok`；新仓库版本尚未部署，不能据此认定新版本 E2E 通过。
+- `express-bonj-041` 的 `/health` 返回 `status: ok`，Release ID 与已发布制品一致；核心冒烟见 `production-smoke-2026-07-26.md`。
