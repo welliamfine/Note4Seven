@@ -32,11 +32,11 @@
     "verify:production": "npm run typecheck && npm run test && npm run build:production && node scripts/validate-project.mjs && node scripts/validate-production.mjs"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0",
-    "lucide-static": "^1.24.0",
-    "miniprogram-api-typings": "^4.0.0",
+    "esbuild": "^0.28.1",
+    "lucide-static": "^1.27.0",
+    "miniprogram-api-typings": "^5.2.1",
     "sharp": "^0.35.3",
-    "typescript": "^5.8.0",
+    "typescript": "^7.0.2",
     "vitest": "4.1.10",
     "@vitest/coverage-v8": "4.1.10"
   },
