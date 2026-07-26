@@ -85,7 +85,7 @@ const localUpload = await fetch(`${baseUrl}/dev-storage/upload?key=${encodeURICo
 assert.equal(localUpload.status, 200, `local object upload failed: ${localUpload.status} ${await localUpload.text()}`);
 await ok(`/media/${media.mediaId}/upload-complete`, {
   method: 'POST', token: owner,
-  body: { etag: 'integration-etag', fileSize: imageBody.length, mimeType: 'image/png', width: 1, height: 1, clientRequestId: `uploaded_${run}` },
+  body: { etag: 'integration-etag', fileSize: imageBody.length, mimeType: 'image/png', clientRequestId: `uploaded_${run}` },
 });
 await waitFor(async () => {
   const state = await ok(`/media/${media.mediaId}`, { token: owner });

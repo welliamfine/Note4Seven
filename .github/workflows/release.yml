@@ -28,6 +28,8 @@ jobs:
             package-lock.json
             server/package-lock.json
             cloudfunctions/cos-media-trigger/package-lock.json
+      - name: Use pinned npm
+        run: npm install --global npm@11.16.0
       - run: node scripts/install-all.mjs
       - shell: bash
         run: |
