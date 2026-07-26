@@ -19,3 +19,11 @@ npm run cloud:check-drift -- --environment=staging --actual=config/cloud-actual.
 ```
 
 目标环境的任何未采集值、与期望不一致或 staging/production 资源复用都会阻断晋级。production 尚未配置时，staging 漂移检查可以执行，但 production 漂移检查、构建和发布均会阻断。Token 与密码只记录“已配置/轮换日期”，不记录真实值。
+
+## 2026-07-26 staging 采集结论
+
+- 服务实例为 1 核、2 GiB，最小 1 个、最大 5 个实例，日志采集路径为 `stdout`，`/health` 公网检查成功。
+- `record_life` 为可用的 MySQL 5.7 数据库，字符集/排序规则为 `utf8mb4` / `utf8mb4_unicode_ci`。
+- 运行账号没有 DDL 权限，维护账号已在迁移前快照成功后应用 `004` 与 `005`；迁移记录见
+  [`staging-database-migration-2026-07-26.md`](./staging-database-migration-2026-07-26.md)。
+- 当前仍缺少预期的 COS ObjectCreated 触发器，因此 staging 漂移检查应继续阻断，不能为了得到绿灯而填写虚假值。

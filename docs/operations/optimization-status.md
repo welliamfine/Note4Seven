@@ -6,11 +6,11 @@
 |---|---|---|---|
 | P0-01 | 完成 | 公开 GitHub 仓库、MIT License、`main`、baseline/release tags、真实 `@welliamfine` CODEOWNER、`Protect main` ruleset、私密漏洞报告 | 无 |
 | P0-02 | 完成 | Node/npm 锁定，三项目 `npm ci`，独立测试边界，`verify:all`，远程 CI run `30190494400` 全部通过 | 无 |
-| P0-03 | 已取证/漂移待消除 | 云 expected/actual 模板与按环境漂移检查；`cloud-actual.2026-07-26.json` 已记录容器、私有存储、缺失数据库/触发器 | 补齐 staging 后复查实例规格、健康检查、日志和备份 |
+| P0-03 | 已取证/仅触发器漂移 | `cloud-actual.2026-07-26.json` 已记录容器规格、实例数、日志、健康检查、私有存储、MySQL 5.7、备份和迁移 | 创建并取证 staging COS ObjectCreated 触发器 |
 | P0-04 | 代码完成 | 同 release ID 的三 ZIP、hash、SBOM、manifest、notes、rollback target | 首次受控晋级/回滚记录 |
 | P0-05 | 代码完成 | COS handler 注入测试、输入校验、Token 轮换、错误向上传递、审计 0 high/critical | staging 部署并验证 SDK overrides 与真实触发 |
-| P0-06 | staging 部分就绪/待部署 | 现有未上线、无保留数据的环境、`express-bonj` 和私有 COS 已归类为 staging；production 配置留空并由门禁阻断 | staging 尚需 MySQL、服务环境变量/部署、COS 触发器；正式上线前再配置独立 production |
-| P0-07 | 代码/手册完成 | 显式迁移、5 个不变校验和、备份/隔离恢复命令、RPO/RTO 基线 | 真实备份恢复演练、账号分权、平台告警 |
+| P0-06 | staging 基础资源就绪/待部署 | 现有未上线环境、`express-bonj`、私有 COS 与 `record_life` MySQL 5.7 已归类为 staging；production 留空并由门禁阻断 | 设置完整服务环境变量、部署新版本、创建 COS 触发器；上线前配置独立 production |
+| P0-07 | 迁移与备份已执行/待恢复演练 | 显式迁移、5 个不变校验和；手动快照成功；运行账号 DDL 被拒，维护账号执行 `004/005` 成功 | 隔离恢复演练、恢复后不变量/冒烟、备份保留期决策、平台告警 |
 | P0-08 | 验收模板完成 | iOS/Android 矩阵、故障场景和证据字段；staging 资源已确定 | staging 部署完成后进行真机、真实 `callContainer`/COS/微信联调 |
 | P0-09 | 代码完成 | 信任身份校验、回调 Token 轮换、IP/用户/模块/媒体维度限流和 429 | 云 WAF/网关全局限流、压测与 Token 实际轮换 |
 | P0-10 | 代码/手册完成 | API/media/outbox/job 指标、readiness、阈值、事故/演练模板 | 真实仪表盘、告警通道、轮值与演练截图 |
@@ -20,7 +20,7 @@
 | P1-04 | 代码完成 | AST 生成 74 operations 的 OpenAPI，漂移门禁和 ADR | 对外消费者合同测试证据 |
 | P1-05 | 模型/手册完成 | 容量计算命令、压测指标、故障注入与扩展阈值 | staging 真实压测/故障注入、成本账单和参数调整证据 |
 | P1-06 | 代码完成 | 优雅 drain、停止新工作、lease heartbeat、有界重试/dead letter、被动 Outbox 审计收敛 | staging 进程终止/租约丢失/重放演练 |
-| P1-07 | 代码完成 | MySQL 5.7 CI、不变量、运营索引迁移、升级门禁 | production/staging `EXPLAIN`、数量基线和升级决策 |
+| P1-07 | staging 迁移完成 | MySQL 5.7 CI、不变量、升级门禁；staging 已应用运营索引与分析事件表迁移 | staging `EXPLAIN`、数量基线和升级决策；production 上线前重放 |
 | P1-08 | 部分完成 | 分包和已抽取的 motion/media/checkin 工具有独立测试 | 大页面与 local/remote API 全量按领域拆分需真机对照；本次不在无真机证据时做高风险改写 |
 | P1-09 | 代码/手册完成 | 同意门禁、批量/上限/退避/离线队列、禁止字段、HMAC userHash、90 天清理 | 真实仪表盘、与服务端事实对账的运营期数据 |
 | P1-10 | 代码/清单完成 | 个人数据清单、注销跨表/COS Outbox/匿名化/分析删除、备份再删除流程 | 法务批准、staging 完整删除报告、管理端最小权限复核 |
@@ -50,3 +50,9 @@ npm --prefix server run migrations:check
 - 公开安全边界：MIT License、`SECURITY.md`、私密漏洞报告、依赖漏洞告警/自动安全更新、秘密扫描和推送保护已启用。
 
 本机 Docker daemon 未运行，但远程 CI 的 MySQL 5.7 容器验证已经通过。CloudBase、真实 COS 触发和真机仍不得标记为已通过。
+
+## 真实 staging 数据库证据
+
+- 迁移记录：[`staging-database-migration-2026-07-26.md`](./staging-database-migration-2026-07-26.md)
+- `record_life` 已从 `003` 追平到 `005`，迁移前手动快照成功。
+- 迁移后的旧版在线服务 `/health` 返回 `status: ok`；新仓库版本尚未部署，不能据此认定新版本 E2E 通过。
