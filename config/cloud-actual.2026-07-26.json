@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "capturedAt": "2026-07-26T20:39:58+08:00",
-  "capturedBy": "CloudBase console and production health endpoint",
+  "capturedAt": "2026-07-26T21:01:29+08:00",
+  "capturedBy": "CloudBase CLI 3.6.4, WeChat Cloud Hosting console, DMC, and production health endpoint",
   "staging": {
     "status": "TO_BE_CONFIGURED"
   },
@@ -11,15 +11,43 @@
     "cloudEnvironmentId": "prod-d5g4tznceeecbaf39",
     "service": "express-bonj",
     "serviceStatus": "normal",
+    "serviceVersion": "express-bonj-041",
+    "releaseId": "2026.07.25-rc.3+a7de960368ad",
+    "publicAccess": true,
+    "containerCpuCores": 1,
+    "containerMemoryGiB": 2,
+    "maximumInstances": 5,
+    "logCollectionPath": "stdout",
     "bucket": "7072-prod-d5g4tznceeecbaf39-1346314817",
     "region": "ap-shanghai",
     "storageAcl": "private",
+    "storageObjectCount": 120,
     "database": "record_life",
     "databaseStatus": "available",
     "databaseEngine": "mysql",
     "databaseCompatibility": "5.7",
+    "databaseCharset": "utf8mb4",
+    "databaseCollation": "utf8mb4_unicode_ci",
+    "databaseAutoPauseMinutes": 10,
+    "runtimeDatabaseAccount": "notemylife_app",
+    "migrationDatabaseAccount": "notemylife",
+    "databaseMigrationCount": 5,
+    "databaseLatestMigration": "005_analytics_events.sql",
+    "automaticBackupEnabled": true,
+    "backupRetentionDays": 7,
+    "preMigrationBackup": {
+      "type": "manual-snapshot",
+      "note": "pre-migration-004-005-20260726",
+      "completedAt": "2026-07-26T17:10:50+08:00",
+      "sizeMiB": 2.71,
+      "status": "success"
+    },
     "minimumInstances": 1,
     "healthPath": "/health",
+    "healthCheck": {
+      "capturedAt": "2026-07-26T21:01:29+08:00",
+      "status": "ok"
+    },
     "storageTriggerStatus": "disabled"
   }
 }

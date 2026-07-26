@@ -10,7 +10,7 @@
 | P0-04 | 已生产部署 | `2026.07.25-rc.3+a7de960368ad` 制品已部署为 `express-bonj-041`，线上健康正常，历史版本可回退 | 首次实际回滚演练可在出现独立 staging 后进行 |
 | P0-05 | 当前范围关闭 | COS handler 代码和测试保留；`ENABLE_STORAGE_EVENTS=false`，核心 `/upload-complete` 链路已通过 | 非上线必需，不再创建/排查 COS 触发器 |
 | P0-06 | production 完成 | 现有 CloudBase、`express-bonj`、MySQL 和私有 COS 已按真实用途登记为 production；构建/校验目标已对齐 | 独立 staging 在多人协作、自动发布或破坏性演练前再创建 |
-| P0-07 | 生产迁移/备份完成 | 001-005 迁移、校验和、生产前手动快照备份均成功 | 隔离恢复演练延后到需要保留正式用户数据前 |
+| P0-07 | 生产迁移/备份完成 | 001-005 迁移、校验和、生产前手动快照备份均成功；运行账号 DDL 被拒，维护账号执行 `004/005` 成功 | 隔离恢复演练延后到需要保留正式用户数据前 |
 | P0-08 | 核心冒烟完成 | 开发者工具已通过登录、数据库写入、单图直传、`upload-complete`、图片处理和首页显示 | 正式公开发布或扩大测试用户前补 iOS/Android 真机矩阵 |
 | P0-09 | 代码完成 | 信任身份校验、回调 Token 轮换、IP/用户/模块/媒体维度限流和 429 | 云 WAF/网关全局限流、压测与 Token 实际轮换 |
 | P0-10 | 当前范围关闭 | 健康端点和结构化运行日志可用；`ENABLE_METRICS=false` | 指标/告警属于后续运营能力，不阻断当前上线 |
@@ -20,7 +20,7 @@
 | P1-04 | 代码完成 | AST 生成 74 operations 的 OpenAPI，漂移门禁和 ADR | 对外消费者合同测试证据 |
 | P1-05 | 模型/手册完成 | 容量计算命令、压测指标、故障注入与扩展阈值 | staging 真实压测/故障注入、成本账单和参数调整证据 |
 | P1-06 | 代码完成 | 优雅 drain、停止新工作、lease heartbeat、有界重试/dead letter、被动 Outbox 审计收敛 | staging 进程终止/租约丢失/重放演练 |
-| P1-07 | 代码完成 | MySQL 5.7 CI、不变量、运营索引迁移、升级门禁 | production/staging `EXPLAIN`、数量基线和升级决策 |
+| P1-07 | production 迁移完成 | MySQL 5.7 CI、不变量、升级门禁；production 已应用运营索引与分析事件表迁移 | 运营数据形成后补 `EXPLAIN`、数量基线和升级决策 |
 | P1-08 | 部分完成 | 分包和已抽取的 motion/media/checkin 工具有独立测试 | 大页面与 local/remote API 全量按领域拆分需真机对照；本次不在无真机证据时做高风险改写 |
 | P1-09 | 代码/手册完成 | 同意门禁、批量/上限/退避/离线队列、禁止字段、HMAC userHash、90 天清理 | 真实仪表盘、与服务端事实对账的运营期数据 |
 | P1-10 | 代码/清单完成 | 个人数据清单、注销跨表/COS Outbox/匿名化/分析删除、备份再删除流程 | 法务批准、staging 完整删除报告、管理端最小权限复核 |
@@ -51,3 +51,9 @@ npm --prefix server run migrations:check
 - 公开安全边界：MIT License、`SECURITY.md`、私密漏洞报告、依赖漏洞告警/自动安全更新、秘密扫描和推送保护已启用。
 
 本机 Docker daemon 未运行，但远程 CI 的 MySQL 5.7 容器验证已经通过。Production CloudBase 与开发者工具核心冒烟已通过；COS 触发器明确关闭且不属于核心链路，iOS/Android 真机矩阵仍未执行。
+
+## 真实 production 数据库证据
+
+- 迁移记录：[`production-database-migration-2026-07-26.md`](./production-database-migration-2026-07-26.md)
+- `record_life` 已从 `003` 追平到 `005`，迁移前手动快照成功。
+- `express-bonj-041` 的 `/health` 返回 `status: ok`，Release ID 与已发布制品一致；核心冒烟见 `production-smoke-2026-07-26.md`。
