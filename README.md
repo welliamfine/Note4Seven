@@ -55,6 +55,8 @@ npm run release:build -- --release-id=2026.07.25-rc.2+<git-short-sha> --rollback
 
 生产自动迁移默认关闭；微信回调、COS 触发、订阅消息、指标和分析都是显式 capability。分析在用户同意前不收集，且不接收照片地址、Token、昵称、自由文本或业务对象 ID。
 
+安全问题不要提交公开 Issue，请按[安全策略](.github/SECURITY.md)使用 GitHub 私密漏洞报告。仓库、Issue、PR 和 CI 日志中不得包含真实密钥或用户数据。
+
 当前可自动验证的代码状态与必须在真实云/真机完成的项目见 [优化执行状态](docs/operations/optimization-status.md)。
 
 ## 关键目录
@@ -68,3 +70,7 @@ scripts/                     构建、审计、发布和漂移检查
 docs/adr/                    架构决策
 docs/operations/             发布、恢复、监控、验收与隐私手册
 ```
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。
