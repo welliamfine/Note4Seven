@@ -8,6 +8,7 @@ import { archiveEntries, createZip } from './lib/zip.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const node = process.execPath;
+const packageManifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const commit = git(['rev-parse', 'HEAD']);
 const shortCommit = commit.slice(0, 12);
 const dirty = git(['status', '--porcelain']);
@@ -89,7 +90,7 @@ const manifest = {
   gitTag: `release-${releaseId}`,
   createdAt: new Date().toISOString(),
   build: { node: process.version, npm: npmVersion(), platform: `${process.platform}-${process.arch}` },
-  versions: { miniprogram: '0.3.0-rc.1', backend: '0.1.0', cosMediaTrigger: '1.0.0' },
+  versions: { miniprogram: packageManifest.version, backend: '0.1.0', cosMediaTrigger: '1.0.0' },
   migrations,
   artifacts,
   deployment: { strategy: 'automatic-build-manual-approval', productionApproved: false },

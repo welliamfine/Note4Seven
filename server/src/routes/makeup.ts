@@ -200,9 +200,24 @@ function resolveApproval(pool: Pool, action: 'approve' | 'reject') {
         [approvalId, user.userId, access.member_instance_id, action],
       );
       await connection.execute(
-        `UPDATE module_inbox_item SET status = 'resolved', updated_at = UTC_TIMESTAMP(3)
+        `UPDATE module_inbox_item
+            SET type = 'makeup_result', title = '补卡已处理', content = ?,
+                status = IF(recipient_user_id = ?, 'read', 'unread'),
+                updated_at = UTC_TIMESTAMP(3), expire_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 7 DAY)
           WHERE target_type = 'makeup_approval' AND target_id = ?`,
-        [approvalId],
+        [`「${user.nickname}」已${action === 'approve' ? '通过' : '拒绝'}该补卡申请`, user.userId, approvalId],
+      );
+      await connection.execute(
+        `INSERT IGNORE INTO module_inbox_item
+           (module_id, recipient_user_id, type, title, content, target_type, target_id, record_date,
+            status, dedupe_key, expire_at)
+         VALUES (?, ?, 'makeup_result', ?, ?, 'record', ?, ?, 'unread', ?,
+                 DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 7 DAY))`,
+        [approval.module_id, approval.applicant_user_id,
+          action === 'approve' ? '补卡已通过' : '补卡未通过',
+          action === 'approve' ? '你的补卡记录已经生效' : '本次补卡申请被拒绝',
+          approval.record_id, sqlDate(approval.target_date),
+          `makeup_result:${approvalId}:${approval.applicant_user_id}`],
       );
       await connection.execute(
         `INSERT INTO notification

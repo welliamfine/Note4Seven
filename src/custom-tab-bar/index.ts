@@ -1,11 +1,18 @@
+import { refreshUnreadNotificationCount } from '../services/api';
+
 interface PrimaryTabHost {
   changePrimaryTab?: (index: number) => void;
+  syncUnreadNotificationCount?: (unreadCount: number) => void;
 }
+
+const NOTIFICATION_SYNC_INTERVAL = 5_000;
+let notificationSyncTimer: ReturnType<typeof setInterval> | undefined;
 
 Component({
   data: {
     selected: 0,
     hidden: false,
+    profileHasUnread: false,
     tabs: [
       { pagePath: '/pages/home/index', text: '首页', icon: '/assets/ui/icons/house.svg' },
       { pagePath: '/pages/memory/index', text: '回忆', icon: '/assets/ui/icons/sparkles.svg' },
@@ -13,7 +20,34 @@ Component({
       { pagePath: '/pages/profile/index', text: '我的', icon: '/assets/ui/icons/user-round.svg' }
     ]
   },
+  pageLifetimes: {
+    show() { this.startNotificationSync(); },
+    hide() { this.stopNotificationSync(); },
+  },
+  lifetimes: {
+    detached() { this.stopNotificationSync(); },
+  },
   methods: {
+    startNotificationSync() {
+      this.stopNotificationSync();
+      void this.refreshNotificationDot();
+      notificationSyncTimer = setInterval(() => void this.refreshNotificationDot(), NOTIFICATION_SYNC_INTERVAL);
+    },
+    stopNotificationSync() {
+      if (notificationSyncTimer) clearInterval(notificationSyncTimer);
+      notificationSyncTimer = undefined;
+    },
+    async refreshNotificationDot() {
+      try {
+        const unreadCount = await refreshUnreadNotificationCount();
+        this.setData({ profileHasUnread: unreadCount > 0 });
+        const pages = getCurrentPages();
+        const currentPage = pages[pages.length - 1] as unknown as PrimaryTabHost | undefined;
+        currentPage?.syncUnreadNotificationCount?.(unreadCount);
+      } catch {
+        // Keep the last known indicator when refreshing the remote count fails.
+      }
+    },
     switchTab(event: WechatMiniprogram.TouchEvent) {
       const index = Number(event.currentTarget.dataset.index);
       const pagePath = event.currentTarget.dataset.path as string;

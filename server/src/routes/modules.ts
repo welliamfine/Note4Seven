@@ -30,12 +30,8 @@ const updateBody = z.object({
   clientRequestId: z.string().min(8).max(64),
 });
 
-const deleteBody = z.object({
-  confirmationName: z.string(),
-  clientRequestId: z.string().min(8).max(64),
-});
-
 const simpleWriteBody = z.object({ clientRequestId: z.string().min(8).max(64) });
+const deleteBody = simpleWriteBody.extend({ confirmationName: z.string().trim().min(1).max(10).optional() });
 
 interface TemplateRow extends RowDataPacket {
   template_id: string;
@@ -64,6 +60,7 @@ interface ModuleRow extends RowDataPacket {
   is_pinned?: number;
   current_role?: 'creator' | 'member';
   current_member_instance_id?: string;
+  unread_inbox_count?: number;
 }
 
 interface MemberRow extends RowDataPacket {
@@ -167,7 +164,10 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
     const user = authUser(request);
     const [modules] = await pool.execute<ModuleRow[]>(
       `SELECT m.*, COALESCE(p.is_pinned, 0) AS is_pinned,
-              mm.role AS current_role, mm.member_instance_id AS current_member_instance_id
+              mm.role AS current_role, mm.member_instance_id AS current_member_instance_id,
+              (SELECT COUNT(*) FROM module_inbox_item i
+                WHERE i.module_id = m.module_id AND i.recipient_user_id = mm.user_id
+                  AND i.status = 'unread' AND i.expire_at > UTC_TIMESTAMP(3)) AS unread_inbox_count
          FROM module_member mm
          JOIN life_module m ON m.module_id = mm.module_id
          LEFT JOIN user_module_preference p ON p.user_id = mm.user_id AND p.module_id = mm.module_id
@@ -295,10 +295,9 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
     const body = parseBody(deleteBody, request);
     const result = await idempotent(pool, user.userId, 'module_delete', body.clientRequestId, body, async (connection) => {
       await requireMember(connection, moduleId, user.userId, { creator: true, lock: true });
-      const [rows] = await connection.execute<ModuleRow[]>('SELECT name, status FROM life_module WHERE module_id = ? FOR UPDATE', [moduleId]);
+      const [rows] = await connection.execute<ModuleRow[]>('SELECT status FROM life_module WHERE module_id = ? FOR UPDATE', [moduleId]);
       const module = rows[0];
       if (!module) throw new AppError('MODULE_NOT_FOUND', '模块不存在', 404);
-      if (module.name !== body.confirmationName) throw new AppError('CONFIRMATION_NAME_MISMATCH', '模块名称输入不正确', 422);
       const now = new Date();
       const expireAt = addDays(now, 7);
       await connection.execute(
@@ -363,11 +362,12 @@ async function loadMembers(pool: Pool, moduleIds: string[]): Promise<MemberRow[]
   if (!moduleIds.length) return [];
   const placeholders = moduleIds.map(() => '?').join(',');
   const [rows] = await pool.query<MemberRow[]>(
-    `SELECT module_id, member_instance_id, user_id, role, join_sequence,
-            nickname_snapshot, avatar_file_key_snapshot, joined_at
-       FROM module_member
-      WHERE module_id IN (${placeholders}) AND status = 'active'
-      ORDER BY module_id, join_sequence`,
+    `SELECT mm.module_id, mm.member_instance_id, mm.user_id, mm.role, mm.join_sequence,
+            u.nickname AS nickname_snapshot, u.avatar_file_key AS avatar_file_key_snapshot, mm.joined_at
+       FROM module_member mm
+       JOIN user_account u ON u.user_id = mm.user_id
+      WHERE mm.module_id IN (${placeholders}) AND mm.status = 'active'
+      ORDER BY mm.module_id, mm.join_sequence`,
     moduleIds,
   );
   return rows;
@@ -379,6 +379,8 @@ async function loadTodayPreviews(pool: Pool, moduleIds: string[]): Promise<Previ
     `SELECT r.module_id, r.record_id, r.member_instance_id, r.first_effective_at,
             ma.sticker_thumbnail_file_key
        FROM life_record r
+       JOIN module_member mm ON mm.member_instance_id = r.member_instance_id
+        AND mm.module_id = r.module_id AND mm.status = 'active'
        JOIN media_asset ma ON ma.media_id = r.media_id
       WHERE r.module_id IN (${placeholders}) AND r.record_date = ?
         AND r.status IN ('active', 'locked') AND ma.status = 'ready'
@@ -409,6 +411,7 @@ async function homeModule(
     version: module.version,
     currentUserRole: module.current_role ?? 'member',
     isPinned: Boolean(module.is_pinned),
+    unreadInboxCount: Number(module.unread_inbox_count ?? 0),
     lastActivityAt: isoWithShanghaiOffset(module.last_activity_at),
     activeMembers: await Promise.all(activeMembers.map(async (member) => ({
       memberInstanceId: publicId('mi', member.member_instance_id),

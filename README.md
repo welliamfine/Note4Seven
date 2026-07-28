@@ -1,4 +1,4 @@
-# 记录我的一辈子
+# 七日记（Note4Seven）
 
 微信原生小程序与 CloudBase 后端。仓库包含小程序、Express/MySQL 服务、COS 对象创建触发函数，三者使用同一 release ID 发布。
 

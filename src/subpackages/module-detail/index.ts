@@ -10,9 +10,11 @@ import {
   getCurrentUser,
   getCurrentMakeupApproval,
   getDateRecords,
+  getModuleInbox,
   getModuleInboxCount,
   getModuleMonthSummary,
   getModule,
+  refreshModule,
   getReactionOptions,
   getRecordReactions,
   processMedia,
@@ -25,6 +27,8 @@ import {
   type ReactionView,
 } from '../../services/api';
 import { track } from '../../services/tracker';
+import { invalidateModuleGallery, prefetchModuleGallery } from '../../services/gallery-cache';
+import { queueHomePreviewUpdate } from '../../services/home-preview-cache';
 import {
   addDays,
   dateLabel,
@@ -39,11 +43,17 @@ import { createId } from '../../utils/id';
 import { pollIntervalForElapsed, waitingCopy } from '../../utils/checkin-processing';
 import { waitForSheetMotion } from '../../utils/sheet-motion';
 import { STICKER_MOTION, waitForAppRouteDone } from '../../utils/sticker-motion';
+import { preloadImageSources } from '../../utils/image-preload';
+import { mergeMemberSnapshot } from '../../utils/member-sync';
 import {
+  buildMemberCalendarPages,
   createCalendarStickerPlan,
+  mergeCalendarSnapshot,
   prepareCalendarForExit,
   showCalendarStickers,
   type AnimatedCalendarCell,
+  type CalendarStickerLocation,
+  type MemberCalendarPage,
 } from './calendar-controller';
 
 interface RecordView extends LifeRecord {
@@ -67,6 +77,12 @@ interface MemberView {
   recordedToday: boolean;
 }
 
+interface ModuleDetailCacheEntry {
+  module: LifeModule;
+  currentUser: User;
+  calendar: CalendarCell[];
+}
+
 let mediaProgressTimer: ReturnType<typeof setInterval> | undefined;
 let calendarTouchStartX = 0;
 let monthTransitionToken = 0;
@@ -78,6 +94,38 @@ let stickerSequenceStartedAt = 0;
 let editorStickerTimers: Array<ReturnType<typeof setTimeout>> = [];
 let editorProcessingTimer: ReturnType<typeof setTimeout> | undefined;
 let editorMediaTaskToken = 0;
+let memberCalendarMotionTimer: ReturnType<typeof setTimeout> | undefined;
+let calendarSyncTimer: ReturnType<typeof setInterval> | undefined;
+let calendarSyncInFlight = false;
+let calendarPageVisible = false;
+let calendarSyncGeneration = 0;
+let freshCalendarStickerTimers: Array<ReturnType<typeof setTimeout>> = [];
+const moduleDetailCache = new Map<string, ModuleDetailCacheEntry>();
+
+const moduleDetailCacheKey = (moduleId: string, month: string) => `${moduleId}:${month}`;
+
+const MEMBER_CALENDAR_MOTION_DURATION = 260;
+const CALENDAR_SYNC_INTERVAL = 5_000;
+
+const slotsForMembers = (memberCount: number): string[] => {
+  if (memberCount === 1) return ['center'];
+  if (memberCount === 2) return ['top-center', 'bottom-center'];
+  if (memberCount === 3) return ['top-left', 'top-right', 'bottom-center'];
+  return ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+};
+
+const clearFreshCalendarStickerTimers = () => {
+  freshCalendarStickerTimers.forEach((timer) => clearTimeout(timer));
+  freshCalendarStickerTimers = [];
+};
+
+const waitForMemberCalendarMotion = (): Promise<void> => new Promise((resolve) => {
+  if (memberCalendarMotionTimer) clearTimeout(memberCalendarMotionTimer);
+  memberCalendarMotionTimer = setTimeout(() => {
+    memberCalendarMotionTimer = undefined;
+    resolve();
+  }, MEMBER_CALENDAR_MOTION_DURATION);
+});
 
 const clearEditorStickerTimers = () => {
   editorStickerTimers.forEach((timer) => clearTimeout(timer));
@@ -138,6 +186,7 @@ Page({
   data: {
     statusBarHeight: 24,
     loading: true,
+    initialShowPending: true,
     moduleId: '',
     module: null as LifeModule | null,
     currentUser: null as User | null,
@@ -145,6 +194,10 @@ Page({
     month: monthOf(shanghaiDate()),
     currentMonthLabel: monthLabel(monthOf(shanghaiDate())),
     calendar: [] as AnimatedCalendarCell[],
+    memberCalendars: [] as MemberCalendarPage[],
+    memberCalendarOpen: false,
+    memberCalendarClosing: false,
+    memberCalendarIndex: 0,
     memberViews: [] as MemberView[],
     todayRecord: null as LifeRecord | null,
     todayProcessingCheckinId: '',
@@ -213,34 +266,69 @@ Page({
       moduleId: query.moduleId,
       statusBarHeight: wx.getWindowInfo?.().statusBarHeight ?? 24,
     });
-    void this.loadAll(true, true).then(() => {
+    const cached = moduleDetailCache.get(moduleDetailCacheKey(query.moduleId, this.data.month));
+    const initialLoad = cached
+      ? this.loadAll(false, true, cached)
+      : this.loadAll(true, true);
+    void initialLoad.then(() => {
       if (query.date && this.data.module) void this.openDateValue(query.date);
+      if (cached && calendarPageVisible) void this.syncCalendarInBackground();
     });
   },
 
   onShow() {
-    if (this.data.moduleId && !this.data.loading && !this.data.monthTransitioning) void this.loadAll(false, true);
+    calendarPageVisible = true;
+    this.startCalendarSync();
+    if (this.data.initialShowPending) {
+      this.setData({ initialShowPending: false });
+      return;
+    }
+    if (this.data.moduleId && this.data.module && !this.data.loading) {
+      this.applyTodoBadge();
+      void this.syncCalendarInBackground();
+      void this.replayCalendarStickers();
+    }
+  },
+
+  onHide() {
+    calendarPageVisible = false;
+    this.stopCalendarSync();
+    this.finishFreshCalendarStickerAnimation();
   },
 
   onUnload() {
+    calendarPageVisible = false;
+    this.stopCalendarSync();
+    this.finishFreshCalendarStickerAnimation();
     monthTransitionToken += 1;
     finishCalendarMotion();
     cancelStickerTimeline();
     clearEditorStickerTimers();
     invalidateEditorMediaTask();
+    if (memberCalendarMotionTimer) clearTimeout(memberCalendarMotionTimer);
+    memberCalendarMotionTimer = undefined;
     discardPrewarmedMediaUpload(this.data.moduleId);
     if (mediaProgressTimer) clearInterval(mediaProgressTimer);
   },
 
-  async loadAll(showLoading = true, animateEntry = false) {
+  async loadAll(showLoading = true, animateEntry = false, cached?: ModuleDetailCacheEntry) {
     const routeReady = animateEntry ? waitForAppRouteDone() : Promise.resolve();
+    const inboxReady = getModuleInbox(this.data.moduleId).catch(() => undefined);
     if (showLoading) this.setData({ loading: true });
     try {
-      const [module, currentUser, calendar] = await Promise.all([
-        getModule(this.data.moduleId),
-        getCurrentUser(),
-        getCalendar(this.data.moduleId, this.data.month),
-      ]);
+      const [module, currentUser, calendar] = cached
+        ? [cached.module, cached.currentUser, cached.calendar]
+        : await Promise.all([
+            getModule(this.data.moduleId),
+            getCurrentUser(),
+            getCalendar(this.data.moduleId, this.data.month),
+          ]);
+      if (!cached) await inboxReady;
+      moduleDetailCache.set(moduleDetailCacheKey(this.data.moduleId, this.data.month), {
+        module,
+        currentUser,
+        calendar,
+      });
       const todayCell = calendar.find((cell) => cell.date === this.data.today);
       const todayRecords = todayCell?.records ?? [];
       const todayRecord = todayRecords.find((record) => record.userId === currentUser.userId) ?? null;
@@ -254,8 +342,12 @@ Page({
         isMine: member.userId === currentUser.userId,
         recordedToday: todayRecords.some((record) => record.memberInstanceId === member.memberInstanceId),
       }));
+      const memberCalendars = buildMemberCalendarPages(calendar, module.members, currentUser.userId);
+      const previousMemberId = this.data.memberCalendars[this.data.memberCalendarIndex]?.memberInstanceId;
+      const preferredMemberId = previousMemberId
+        ?? module.members.find((member) => member.userId === currentUser.userId)?.memberInstanceId;
+      const preferredMemberIndex = memberCalendars.findIndex((item) => item.memberInstanceId === preferredMemberId);
       const presentation = this.buildMonthPresentation(calendar, module, currentUser, this.data.month);
-      await routeReady;
       if (animateEntry) cancelStickerTimeline();
       const token = animateEntry ? ++monthTransitionToken : monthTransitionToken;
       const stickerPlan = animateEntry ? createCalendarStickerPlan(calendar, presentation.galleryHasSticker) : null;
@@ -263,6 +355,10 @@ Page({
         module,
         currentUser,
         calendar: stickerPlan?.calendar ?? showCalendarStickers(calendar),
+        memberCalendars,
+        memberCalendarOpen: this.data.memberCalendarOpen && memberCalendars.length > 1,
+        memberCalendarClosing: false,
+        memberCalendarIndex: Math.max(0, preferredMemberIndex),
         memberViews,
         todayRecord,
         todayProcessingCheckinId: todayCell?.processingCheckinId ?? '',
@@ -275,10 +371,11 @@ Page({
         monthNumberClass: '',
         statsNumberClass: '',
         monthStickerPhase: animateEntry ? 'sticker-hidden' : 'sticker-visible',
-        cellBackgroundPhase: animateEntry ? 'cell-fill-hidden' : 'cell-fill-visible',
-        todoBadgePhase: animateEntry ? 'badge-hidden' : (presentation.todoCount ? 'badge-visible' : 'badge-hidden'),
+        cellBackgroundPhase: 'cell-fill-visible',
+        todoBadgePhase: presentation.todoCount ? 'badge-visible' : 'badge-hidden',
         loading: false,
       }, resolve));
+      if (cached) void inboxReady.then(() => this.applyTodoBadge());
       track('module_detail_view', {
         moduleId: module.moduleId,
         moduleMode: module.mode,
@@ -288,18 +385,12 @@ Page({
       });
       if (!animateEntry || !stickerPlan) return;
 
+      await routeReady;
+      if (token !== monthTransitionToken) return;
       await waitForStickerTimeline(STICKER_MOTION.pageSettledDelay);
       if (token !== monthTransitionToken) return;
-      this.setData({ cellBackgroundPhase: 'cell-fill-entering' });
-
-      await waitForStickerTimeline(STICKER_MOTION.cellRevealDuration);
-      if (token !== monthTransitionToken) return;
       stickerSequenceStartedAt = Date.now();
-      this.setData({
-        cellBackgroundPhase: 'cell-fill-visible',
-        monthStickerPhase: 'sticker-entering',
-        todoBadgePhase: presentation.todoCount ? 'badge-entering' : 'badge-hidden',
-      });
+      this.setData({ monthStickerPhase: 'sticker-entering' });
 
       await waitForStickerTimeline(stickerPlan.finalDelay + STICKER_MOTION.duration);
       if (token !== monthTransitionToken) return;
@@ -314,6 +405,250 @@ Page({
       this.setData({ loading: false, monthTransitioning: false });
       wx.showToast({ title: '模块加载失败', icon: 'none' });
     }
+  },
+
+  startCalendarSync() {
+    this.stopCalendarSync(false);
+    calendarSyncTimer = setInterval(() => void this.syncCalendarInBackground(), CALENDAR_SYNC_INTERVAL);
+  },
+
+  stopCalendarSync(invalidate = true) {
+    if (calendarSyncTimer) clearInterval(calendarSyncTimer);
+    calendarSyncTimer = undefined;
+    if (invalidate) calendarSyncGeneration += 1;
+  },
+
+  async syncCalendarInBackground() {
+    if (calendarSyncInFlight
+      || !calendarPageVisible
+      || !this.data.module
+      || !this.data.currentUser
+      || this.data.loading
+      || this.data.monthTransitioning
+      || this.data.editorOpen
+      || this.data.dateSheetOpen
+      || this.data.saving) return;
+    calendarSyncInFlight = true;
+    const generation = calendarSyncGeneration;
+    const month = this.data.month;
+    const moduleId = this.data.moduleId;
+    try {
+      const [snapshot, , freshModule] = await Promise.all([
+        getCalendar(moduleId, month),
+        getModuleInbox(moduleId).catch(() => undefined),
+        refreshModule(moduleId),
+      ]);
+      if (generation !== calendarSyncGeneration
+        || !calendarPageVisible
+        || month !== this.data.month
+        || moduleId !== this.data.moduleId) return;
+      this.applyTodoBadge();
+      await this.applyCalendarSnapshot(snapshot, Promise.resolve(), generation, freshModule);
+    } catch {
+      // Background reconciliation keeps the last rendered snapshot on transient failures.
+    } finally {
+      calendarSyncInFlight = false;
+    }
+  },
+
+  applyTodoBadge() {
+    const todoCount = getModuleInboxCount(this.data.moduleId);
+    if (todoCount === this.data.todoCount) return;
+    this.setData({
+      todoCount,
+      todoBadgePhase: todoCount ? 'badge-visible' : 'badge-hidden',
+    });
+  },
+
+  finishFreshCalendarStickerAnimation() {
+    clearFreshCalendarStickerTimers();
+    const patch: Record<string, unknown> = {};
+    this.data.calendar.forEach((cell, cellIndex) => {
+      cell.records.forEach((record, recordIndex) => {
+        if (record.motionPhase) patch[`calendar[${cellIndex}].records[${recordIndex}].motionPhase`] = '';
+      });
+    });
+    if (Object.keys(patch).length) this.setData(patch);
+  },
+
+  playFreshCalendarStickerAnimation(locations: CalendarStickerLocation[], finalDelay: number) {
+    if (!locations.length) return;
+    freshCalendarStickerTimers.push(setTimeout(() => {
+      const enteringPatch = locations.reduce<Record<string, unknown>>((patch, location) => {
+        patch[`calendar[${location.cellIndex}].records[${location.recordIndex}].motionPhase`] = 'sticker-entering';
+        return patch;
+      }, {});
+      this.setData(enteringPatch);
+    }, STICKER_MOTION.pageSettledDelay));
+    freshCalendarStickerTimers.push(setTimeout(() => {
+      const visiblePatch = locations.reduce<Record<string, unknown>>((patch, location) => {
+        patch[`calendar[${location.cellIndex}].records[${location.recordIndex}].motionPhase`] = '';
+        return patch;
+      }, {});
+      this.setData(visiblePatch);
+      freshCalendarStickerTimers = [];
+    }, STICKER_MOTION.pageSettledDelay + finalDelay + STICKER_MOTION.duration));
+  },
+
+  async applyCalendarSnapshot(
+    snapshot: CalendarCell[],
+    beforeApply: Promise<void> = Promise.resolve(),
+    generation = calendarSyncGeneration,
+    moduleSnapshot?: LifeModule,
+  ): Promise<boolean> {
+    const module = this.data.module;
+    const currentUser = this.data.currentUser;
+    if (!module || !currentUser) return false;
+    const memberPlan = mergeMemberSnapshot(module.members, moduleSnapshot?.members ?? module.members);
+    const syncedModule = memberPlan.changed ? {
+      ...module,
+      members: memberPlan.members,
+      creatorUserId: moduleSnapshot?.creatorUserId ?? module.creatorUserId,
+      version: moduleSnapshot?.version ?? module.version,
+    } : module;
+    const normalizedSnapshot = snapshot.map((cell) => ({
+      ...cell,
+      records: cell.records.map((record) => ({
+        ...record,
+        member: syncedModule.members.find((member) => member.memberInstanceId === record.memberInstanceId) ?? record.member,
+      })),
+    }));
+    const plan = mergeCalendarSnapshot(this.data.calendar, normalizedSnapshot);
+    await Promise.all([
+      preloadImageSources([...plan.animatedStickerSources, ...memberPlan.avatarSources]),
+      beforeApply,
+    ]);
+    if (generation !== calendarSyncGeneration || module.moduleId !== this.data.moduleId) return false;
+    moduleDetailCache.set(moduleDetailCacheKey(module.moduleId, this.data.month), {
+      module: syncedModule,
+      currentUser,
+      calendar: normalizedSnapshot,
+    });
+    if (!plan.changedCellIndexes.length && !memberPlan.changed) return false;
+    this.finishFreshCalendarStickerAnimation();
+    const patch: Record<string, unknown> = {};
+    plan.changedCellIndexes.forEach((cellIndex) => {
+      const cell = plan.calendar[cellIndex];
+      patch[`calendar[${cellIndex}].hasRecords`] = cell.hasRecords;
+      patch[`calendar[${cellIndex}].hasPendingMakeup`] = Boolean(cell.hasPendingMakeup);
+      patch[`calendar[${cellIndex}].processingCheckinId`] = cell.processingCheckinId ?? '';
+      patch[`calendar[${cellIndex}].records`] = cell.records;
+    });
+    const todayCell = plan.calendar.find((cell) => cell.date === this.data.today);
+    const todayRecords = todayCell?.records ?? [];
+    patch.todayRecord = todayRecords.find((record) => record.userId === currentUser.userId) ?? null;
+    patch.todayProcessingCheckinId = todayCell?.processingCheckinId ?? '';
+    const memberCalendars = buildMemberCalendarPages(plan.calendar, syncedModule.members, currentUser.userId);
+    if (memberPlan.changed) {
+      patch['module.members'] = memberPlan.members;
+      patch.memberViews = syncedModule.members.map<MemberView>((member) => ({
+        memberInstanceId: member.memberInstanceId,
+        nickname: member.nickname,
+        avatarText: member.avatarText,
+        avatarColor: member.avatarColor,
+        avatarUrl: member.avatarUrl,
+        roleLabel: member.role === 'creator' ? '\u521b\u5efa\u8005' : '',
+        isMine: member.userId === currentUser.userId,
+        recordedToday: todayRecords.some((record) => record.memberInstanceId === member.memberInstanceId),
+      }));
+      const selectedMemberId = this.data.memberCalendars[this.data.memberCalendarIndex]?.memberInstanceId;
+      const selectedMemberIndex = memberCalendars.findIndex((item) => item.memberInstanceId === selectedMemberId);
+      patch.memberCalendars = memberCalendars;
+      patch.memberCalendarIndex = Math.max(0, selectedMemberIndex);
+      patch.memberCalendarOpen = this.data.memberCalendarOpen && memberCalendars.length > 1;
+      patch.memberCalendarClosing = false;
+    } else {
+      syncedModule.members.forEach((member, memberIndex) => {
+        const recordedToday = todayRecords.some((record) => record.memberInstanceId === member.memberInstanceId);
+        if (this.data.memberViews[memberIndex]?.recordedToday !== recordedToday) {
+          patch[`memberViews[${memberIndex}].recordedToday`] = recordedToday;
+        }
+      });
+      memberCalendars.forEach((memberCalendar, pageIndex) => {
+        const currentPage = this.data.memberCalendars[pageIndex];
+        memberCalendar.cells.forEach((cell, cellIndex) => {
+          const currentCell = currentPage?.cells[cellIndex];
+          if (!currentCell
+            || currentCell.recordId !== cell.recordId
+            || currentCell.stickerPath !== cell.stickerPath
+            || currentCell.hasRecord !== cell.hasRecord) {
+            patch[`memberCalendars[${pageIndex}].cells[${cellIndex}]`] = cell;
+          }
+        });
+      });
+    }
+    const monthCells = plan.calendar.filter((cell) => cell.inMonth);
+    const monthRecords = monthCells.flatMap((cell) => cell.records);
+    patch.monthRecordCount = monthCells.filter((cell) => cell.records.some((record) => record.userId === currentUser.userId)).length;
+    patch.jointCompletedDays = monthCells.filter((cell) => syncedModule.members.length > 0
+      && syncedModule.members.every((member) => cell.records.some((record) => record.memberInstanceId === member.memberInstanceId))).length;
+    patch.streakDays = this.calculateStreak(plan.calendar, currentUser.userId);
+    patch.galleryHasSticker = monthRecords.length > 0;
+    patch.galleryCover = monthRecords[monthRecords.length - 1]?.stickerPath ?? '/assets/stickers/group-3.png';
+    this.setData(patch, () => this.playFreshCalendarStickerAnimation(
+      plan.animatedStickerLocations,
+      plan.finalDelay,
+    ));
+    return true;
+  },
+
+  calendarSnapshotWithRecord(record: LifeRecord): CalendarCell[] {
+    const module = this.data.module;
+    if (!module) return this.data.calendar;
+    const memberIndex = Math.max(0, module.members.findIndex((member) => member.memberInstanceId === record.memberInstanceId));
+    const member = module.members[memberIndex];
+    if (!member) return this.data.calendar;
+    const calendarRecord = {
+      ...record,
+      member,
+      slot: slotsForMembers(module.members.length)[memberIndex] ?? 'center',
+    };
+    return this.data.calendar.map((cell) => {
+      if (cell.date !== record.recordDate) return cell;
+      const records = [...cell.records.filter((item) => item.memberInstanceId !== record.memberInstanceId), calendarRecord]
+        .sort((left, right) => module.members.findIndex((memberItem) => memberItem.memberInstanceId === left.memberInstanceId)
+          - module.members.findIndex((memberItem) => memberItem.memberInstanceId === right.memberInstanceId));
+      return { ...cell, hasRecords: true, processingCheckinId: undefined, records };
+    });
+  },
+
+  calendarSnapshotWithoutRecord(recordId: string): CalendarCell[] {
+    return this.data.calendar.map((cell) => {
+      const records = cell.records.filter((record) => record.recordId !== recordId);
+      return records.length === cell.records.length ? cell : { ...cell, hasRecords: records.length > 0, records };
+    });
+  },
+
+  async replayCalendarStickers() {
+    this.finishFreshCalendarStickerAnimation();
+    cancelStickerTimeline();
+    const token = ++monthTransitionToken;
+    const finalDelay = Math.max(
+      this.data.galleryHasSticker ? this.data.galleryStickerDelay : 0,
+      ...this.data.calendar.flatMap((cell) => cell.records.map((record) => record.popDelay)),
+    );
+    stickerSequenceStartedAt = 0;
+    this.setData({
+      monthStickerPhase: 'sticker-hidden',
+      galleryExitVisible: false,
+      monthTransitioning: true,
+      cellBackgroundPhase: 'cell-fill-visible',
+      todoBadgePhase: this.data.todoCount ? 'badge-visible' : 'badge-hidden',
+    });
+    await waitForAppRouteDone(180);
+    if (token !== monthTransitionToken) return;
+    await waitForStickerTimeline(STICKER_MOTION.pageSettledDelay);
+    if (token !== monthTransitionToken) return;
+    stickerSequenceStartedAt = Date.now();
+    this.setData({ monthStickerPhase: 'sticker-entering' });
+    await waitForStickerTimeline(finalDelay + STICKER_MOTION.duration);
+    if (token !== monthTransitionToken) return;
+    stickerSequenceStartedAt = 0;
+    this.setData({
+      monthStickerPhase: 'sticker-visible',
+      galleryExitVisible: true,
+      monthTransitioning: false,
+    });
   },
 
   calculateStreak(calendar: CalendarCell[], userId: string): number {
@@ -399,6 +734,8 @@ Page({
       || this.data.monthStickerPhase === 'sticker-leaving'
     ) return;
 
+    calendarSyncGeneration += 1;
+    this.finishFreshCalendarStickerAnimation();
     cancelStickerTimeline();
     const token = ++monthTransitionToken;
     const module = this.data.module;
@@ -420,6 +757,8 @@ Page({
 
     this.setData({
       monthTransitioning: true,
+      memberCalendarOpen: false,
+      memberCalendarClosing: false,
       calendar: exitingCalendar,
       galleryExitVisible,
       monthStickerPhase: 'sticker-leaving',
@@ -442,11 +781,21 @@ Page({
       const [calendar] = await Promise.all([calendarPromise, exitMotion]);
       if (token !== monthTransitionToken) return;
       const presentation = this.buildMonthPresentation(calendar, module, currentUser, targetMonth);
+      moduleDetailCache.set(moduleDetailCacheKey(module.moduleId, targetMonth), {
+        module,
+        currentUser,
+        calendar,
+      });
       const stickerPlan = createCalendarStickerPlan(calendar, presentation.galleryHasSticker);
+      const memberCalendars = buildMemberCalendarPages(calendar, module.members, currentUser.userId);
+      const selectedMemberId = this.data.memberCalendars[this.data.memberCalendarIndex]?.memberInstanceId;
+      const selectedMemberIndex = memberCalendars.findIndex((item) => item.memberInstanceId === selectedMemberId);
       const enterMotion = waitForCalendarMotion(340);
       this.setData({
         month: targetMonth,
         calendar: stickerPlan.calendar,
+        memberCalendars,
+        memberCalendarIndex: Math.max(0, selectedMemberIndex),
         currentMonthLabel: monthLabel(targetMonth),
         ...presentation,
         galleryStickerDelay: stickerPlan.galleryDelay,
@@ -510,15 +859,60 @@ Page({
   },
 
   onCalendarTouchStart(event: WechatMiniprogram.TouchEvent) {
+    if (this.data.memberCalendarOpen) return;
     calendarTouchStartX = event.touches[0]?.clientX ?? 0;
   },
 
   onCalendarTouchEnd(event: WechatMiniprogram.TouchEvent) {
+    if (this.data.memberCalendarOpen) return;
     const endX = event.changedTouches[0]?.clientX ?? calendarTouchStartX;
     const distance = endX - calendarTouchStartX;
     if (Math.abs(distance) < 52) return;
     if (distance > 0) this.previousMonth();
     else this.nextMonth();
+  },
+
+  toggleMemberCalendar() {
+    if (this.data.memberCalendarClosing || this.data.monthTransitioning) return;
+    if (this.data.memberCalendarOpen) {
+      void this.dismissMemberCalendar();
+      return;
+    }
+    if (this.data.memberCalendars.length < 2) return;
+    this.setData({ memberCalendarOpen: true, memberCalendarClosing: false });
+    track('member_calendar_popover_open', {
+      moduleId: this.data.moduleId,
+      month: this.data.month,
+      memberCount: this.data.memberCalendars.length,
+    });
+  },
+
+  closeMemberCalendar() {
+    void this.dismissMemberCalendar();
+  },
+
+  async dismissMemberCalendar() {
+    if (!this.data.memberCalendarOpen || this.data.memberCalendarClosing) return;
+    this.setData({ memberCalendarClosing: true });
+    track('member_calendar_popover_close', {
+      moduleId: this.data.moduleId,
+      month: this.data.month,
+      memberCount: this.data.memberCalendars.length,
+    });
+    await waitForMemberCalendarMotion();
+    if (!this.data.memberCalendarClosing) return;
+    this.setData({ memberCalendarOpen: false, memberCalendarClosing: false });
+  },
+
+  onMemberCalendarChange(event: WechatMiniprogram.SwiperChange) {
+    const index = event.detail.current;
+    if (index === this.data.memberCalendarIndex) return;
+    this.setData({ memberCalendarIndex: index });
+    track('member_calendar_swipe', {
+      moduleId: this.data.moduleId,
+      month: this.data.month,
+      memberInstanceId: this.data.memberCalendars[index]?.memberInstanceId,
+    });
   },
 
   openDate(event: WechatMiniprogram.TouchEvent) {
@@ -751,8 +1145,8 @@ Page({
       success: ({ tempFiles }) => {
         const file = tempFiles[0];
         if (!file) return;
-        if (file.size > 10 * 1024 * 1024) {
-          wx.showToast({ title: '请选择小于10MB的照片', icon: 'none' });
+        if (file.size > 20 * 1024 * 1024) {
+          wx.showToast({ title: '请选择小于20MB的照片', icon: 'none' });
           return;
         }
         void this.persistAndProcessPhoto(file.tempFilePath, sourceType);
@@ -972,12 +1366,27 @@ Page({
 
   async submitRecord() {
     if (this.data.editorMediaStatus !== 'ready' || this.data.saving) return;
+    const previousRecordId = this.data.editorRecordId || undefined;
+    const editorDate = this.data.editorDate;
     this.setData({ saving: true });
     try {
       if (this.data.editorProcessingCheckinId) {
         this.setData({ saving: false });
         await this.dismissEditor();
-        await this.loadAll(false);
+        invalidateModuleGallery(this.data.moduleId, editorDate.slice(0, 7));
+        const snapshot = await getCalendar(this.data.moduleId, this.data.month);
+        await this.applyCalendarSnapshot(snapshot);
+        const record = snapshot.find((cell) => cell.date === this.data.today)?.records
+          .find((item) => item.userId === this.data.currentUser?.userId);
+        if (record && record.recordDate === this.data.today) {
+          void queueHomePreviewUpdate({
+            type: 'upsert',
+            moduleId: record.moduleId,
+            recordId: record.recordId,
+            memberInstanceId: record.memberInstanceId,
+            stickerPath: record.stickerPath,
+          });
+        }
         return;
       }
       const makeupResult = this.data.editorMode === 'makeup'
@@ -991,21 +1400,36 @@ Page({
             mediaId: this.data.editorMediaId,
           })
         : null;
-      if (!makeupResult) {
-        await saveRecord({
+      const savedRecord = makeupResult ? null : await saveRecord({
           moduleId: this.data.moduleId,
-          recordId: this.data.editorRecordId || undefined,
-          recordDate: this.data.editorDate,
+          recordId: previousRecordId,
+          recordDate: editorDate,
           originalPath: this.data.editorOriginalPath,
           stickerPath: this.data.editorStickerPath,
           remark: this.data.editorRemark,
           clientRequestId: createId('request'),
           mediaId: this.data.editorMediaId,
         });
+      let homePreviewReady = Promise.resolve();
+      if (savedRecord && savedRecord.recordDate === this.data.today) {
+        homePreviewReady = queueHomePreviewUpdate({
+          type: 'upsert',
+          moduleId: savedRecord.moduleId,
+          recordId: savedRecord.recordId,
+          memberInstanceId: savedRecord.memberInstanceId,
+          previousRecordId,
+          stickerPath: savedRecord.stickerPath,
+        });
       }
       this.setData({ saving: false });
       await this.dismissEditor();
-      await this.loadAll(false);
+      invalidateModuleGallery(this.data.moduleId, editorDate.slice(0, 7));
+      if (savedRecord) {
+        await this.applyCalendarSnapshot(this.calendarSnapshotWithRecord(savedRecord), homePreviewReady);
+      } else {
+        const snapshot = await getCalendar(this.data.moduleId, this.data.month);
+        await this.applyCalendarSnapshot(snapshot);
+      }
       wx.vibrateShort?.({ type: 'light' });
       wx.showToast({
         title: makeupResult
@@ -1041,6 +1465,9 @@ Page({
 
   deleteTodayRecord() {
     if (!this.data.editorRecordId) return;
+    const recordId = this.data.editorRecordId;
+    const moduleId = this.data.moduleId;
+    const editorMonth = this.data.editorDate.slice(0, 7);
     wx.showModal({
       title: '删除今天的记录？',
       content: '贴纸会从首页和日历移除，之后仍可重新记录。',
@@ -1048,9 +1475,11 @@ Page({
       confirmColor: '#F65451',
       success: async ({ confirm }) => {
         if (!confirm) return;
-        await deleteRecord(this.data.editorRecordId);
+        await deleteRecord(recordId);
+        void queueHomePreviewUpdate({ type: 'remove', moduleId, recordId });
         await this.dismissEditor();
-        await this.loadAll(false);
+        invalidateModuleGallery(moduleId, editorMonth);
+        await this.applyCalendarSnapshot(this.calendarSnapshotWithoutRecord(recordId));
         wx.showToast({ title: '已删除' });
       },
     });
@@ -1069,6 +1498,7 @@ Page({
   },
 
   openGallery() {
+    prefetchModuleGallery(this.data.moduleId, this.data.month);
     void wx.navigateTo({ url: `/subpackages/module-gallery/index?moduleId=${this.data.moduleId}&month=${this.data.month}` });
   },
 

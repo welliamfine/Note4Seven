@@ -21,6 +21,26 @@
     {
       "file": "005_analytics_events.sql",
       "sha256": "f05b2ab9e9897a21bb8bce12809b72dc05d8ec1648ce281418ad4f6f7a32ec7b"
+    },
+    {
+      "file": "006_note4seven_templates.sql",
+      "sha256": "14b7ea7f9a5de8591ffaeebc397c38f482965e9a56d55571eafc6e07f0530afc"
+    },
+    {
+      "file": "007_template_copy.sql",
+      "sha256": "1b807cec74a447fdc42e8cfeeea438b772157a627d0e5893210d78e4ec187689"
+    },
+    {
+      "file": "008_join_application_module_inbox.sql",
+      "sha256": "b58968d1298a5ba9be6dc69e7e8d05585d4ba01fbb59f519cb47c1a6d3c04045"
+    },
+    {
+      "file": "009_actionable_inbox_state.sql",
+      "sha256": "96b3e57480dc450deb9dca7808e8b1fc9d4e87b9932661de93da92f0c2bb5f56"
+    },
+    {
+      "file": "010_member_departure_notifications.sql",
+      "sha256": "083d9382e61f918d1b21d2db730e8a33e412627cecd7658af1a7ffd1503f906a"
     }
   ]
 }

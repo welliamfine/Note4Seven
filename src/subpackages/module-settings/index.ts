@@ -1,17 +1,15 @@
 import type { MemberManagementView } from '../../services/api';
 import {
-  deleteModuleToRecycle,
   getMemberManagement,
   getModuleReminder,
   MODULE_DESCRIPTION_MAX_LENGTH,
   MODULE_NAME_MAX_LENGTH,
-  removeModuleForCurrentUser,
   updateModuleInfo,
   updateModuleReminder,
   type ReminderView,
 } from '../../services/api';
 import { track } from '../../services/tracker';
-import { waitForSheetMotion } from '../../utils/sheet-motion';
+import { removeModuleWithConfirmation } from '../../utils/module-removal';
 
 interface InputEvent extends WechatMiniprogram.CustomEvent { detail: { value: string } }
 interface SwitchEvent extends WechatMiniprogram.CustomEvent { detail: { value: boolean } }
@@ -30,10 +28,7 @@ Page({
     inAppEnabled: true,
     reminderTime: '21:00',
     reminderSaving: false,
-    deleteOpen: false,
-    deleteClosing: false,
-    deleteConfirmation: '',
-    deleteError: '',
+    removing: false,
   },
   onLoad(query: Record<string, string | undefined>) { this.setData({ moduleId: query.moduleId ?? '', statusBarHeight: wx.getWindowInfo?.().statusBarHeight ?? 24 }); },
   onShow() { void this.load(); },
@@ -100,42 +95,21 @@ Page({
       showCancel: false,
     });
   },
-  openDelete() { this.setData({ deleteOpen: true, deleteClosing: false, deleteConfirmation: '', deleteError: '' }); },
-  async dismissDelete() {
-    if (!this.data.deleteOpen || this.data.deleteClosing) return;
-    this.setData({ deleteClosing: true });
-    await waitForSheetMotion();
-    if (!this.data.deleteClosing) return;
-    this.setData({ deleteOpen: false, deleteClosing: false });
-  },
-  closeDelete() { void this.dismissDelete(); },
-  stopPropagation() {},
-  onDeleteConfirmation(event: InputEvent) { this.setData({ deleteConfirmation: event.detail.value, deleteError: '' }); },
-  async confirmDelete() {
-    const moduleName = this.data.view?.module.name ?? '';
-    if (this.data.deleteConfirmation.trim() !== moduleName) {
-      this.setData({ deleteError: '输入的模块名称不一致' });
-      return;
+  async removeCurrentModule() {
+    const view = this.data.view;
+    if (!view || this.data.removing) return;
+    const currentUserId = view.members.find((member) => member.isMine)?.userId ?? '';
+    if (!currentUserId) return;
+    this.setData({ removing: true });
+    try {
+      const result = await removeModuleWithConfirmation(view.module, currentUserId);
+      this.setData({ removing: false });
+      if (result === 'cancelled') return;
+      wx.showToast({ title: result === 'deleted' ? '模块已删除' : '模块已移除' });
+      void wx.reLaunch({ url: '/pages/home/index' });
+    } catch {
+      this.setData({ removing: false });
+      wx.showToast({ title: '删除操作失败', icon: 'none' });
     }
-    await this.dismissDelete();
-    wx.showModal({
-      title: '最后确认删除？',
-      content: '所有成员将立即停止打卡。模块会进入7天回收期，期满后永久删除记录和图片。',
-      confirmText: '进入回收站',
-      confirmColor: '#F65451',
-      success: async ({ confirm }) => {
-        if (!confirm) return;
-        try {
-          await deleteModuleToRecycle(this.data.moduleId, moduleName);
-          wx.showToast({ title: '已移入回收站' });
-          void wx.reLaunch({ url: '/pages/home/index' });
-        } catch {
-          wx.showToast({ title: '删除操作失败', icon: 'none' });
-        }
-      },
-    });
-  },
-  exitModule() {
-    wx.showModal({ title: '确认退出模块？', content: '退出后无法继续访问，历史照片、备注和回应会匿名保留。', confirmText: '退出', confirmColor: '#F65451', success: async ({ confirm }) => { if (!confirm) return; await removeModuleForCurrentUser(this.data.moduleId); wx.showToast({ title: '已退出模块' }); void wx.reLaunch({ url: '/pages/home/index' }); } });
   },
 });

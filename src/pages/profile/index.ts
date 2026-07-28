@@ -46,6 +46,7 @@ Page({
         moduleCount: overview.moduleCount,
         unreadCount: overview.unreadCount,
       });
+      this.getTabBar?.()?.setData({ profileHasUnread: overview.unreadCount > 0 });
       track('profile_view', { recordedDays: overview.recordedDays, activeModuleCount: overview.moduleCount });
     } catch {
       this.setData({ user: null, profileLoading: false, profileLoadFailed: true });
@@ -53,6 +54,9 @@ Page({
   },
   retryProfile() {
     void this.loadProfile();
+  },
+  syncUnreadNotificationCount(unreadCount: number) {
+    if (unreadCount !== this.data.unreadCount) this.setData({ unreadCount });
   },
   openProfileEditor() {
     const user = this.data.user;

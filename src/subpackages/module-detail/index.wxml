@@ -1,6 +1,6 @@
 <view class="page-shell detail-page" style="padding-top: {{statusBarHeight}}px;">
   <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
-  <text class="brand-script detail-brand content-layer">NoteMyLife</text>
+  <text class="brand-script detail-brand content-layer">Note4Seven</text>
 
   <view wx:if="{{loading}}" class="detail-loading content-layer"><view></view><view></view><view></view></view>
   <view wx:elif="{{module}}" class="detail-content content-layer">
@@ -23,11 +23,38 @@
           </view>
         </scroll-view>
 
-        <view class="calendar-section {{module.members.length === 1 ? 'solo-calendar' : 'group-calendar'}} {{monthTransitioning ? 'month-transitioning' : ''}}" bindtouchstart="onCalendarTouchStart" bindtouchend="onCalendarTouchEnd">
+        <view class="calendar-section {{module.members.length === 1 ? 'solo-calendar' : 'group-calendar'}} {{module.members.length === 2 ? 'duo-calendar' : ''}} {{monthTransitioning ? 'month-transitioning' : ''}} {{memberCalendarOpen ? 'member-calendar-open' : ''}}" bindtouchstart="onCalendarTouchStart" bindtouchend="onCalendarTouchEnd">
+          <view wx:if="{{memberCalendarOpen}}" class="member-calendar-local-dismiss" catchtap="closeMemberCalendar"></view>
           <view class="calendar-heading">
             <view class="calendar-nav-button" bindtap="previousMonth" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="上个月"><image src="/assets/ui/icons/chevron-left.svg" /></view>
-            <view class="month-number-window"><text class="month-number {{monthNumberClass}}">{{currentMonthLabel}}</text></view>
+            <view class="month-heading-center">
+              <view class="month-number-window"><text class="month-number {{monthNumberClass}}">{{currentMonthLabel}}</text></view>
+              <view wx:if="{{module.members.length > 1}}" class="member-calendar-toggle {{memberCalendarOpen ? 'member-calendar-toggle-active' : ''}}" catchtap="toggleMemberCalendar" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="查看单人日历"><image src="/assets/ui/icons/user-round.svg" /></view>
+            </view>
             <view class="calendar-nav-button" bindtap="nextMonth" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="下个月"><image src="/assets/ui/icons/chevron-right.svg" /></view>
+          </view>
+          <view wx:if="{{memberCalendarOpen}}" class="member-calendar-popover-position" catchtap="stopPropagation">
+            <view class="member-calendar-popover {{memberCalendarClosing ? 'member-calendar-popover-closing' : ''}}">
+              <swiper class="member-calendar-swiper" style="height: {{memberCalendars[0].rowCount === 6 ? 624 : 540}}rpx;" current="{{memberCalendarIndex}}" circular="{{memberCalendars.length > 1}}" duration="260" easing-function="easeOutCubic" bindchange="onMemberCalendarChange">
+                <swiper-item wx:for="{{memberCalendars}}" wx:for-item="memberCalendar" wx:key="memberInstanceId">
+                  <view class="member-calendar-page">
+                    <view class="member-calendar-owner">
+                      <view class="member-calendar-avatar" style="background: {{memberCalendar.avatarColor}};"><image wx:if="{{memberCalendar.avatarUrl}}" src="{{memberCalendar.avatarUrl}}" mode="aspectFill" /><text wx:else>{{memberCalendar.avatarText}}</text></view>
+                      <text>{{memberCalendar.displayName}}</text>
+                    </view>
+                    <view class="member-calendar-weekdays"><text wx:for="{{['周一','周二','周三','周四','周五','周六','周日']}}" wx:key="*this">{{item}}</text></view>
+                    <view class="member-calendar-grid">
+                      <view class="member-calendar-cell {{dayCell.inMonth ? '' : 'member-calendar-outside'}} {{dayCell.isToday ? 'member-calendar-today' : ''}} {{dayCell.hasRecord ? 'member-calendar-recorded' : ''}}" wx:for="{{memberCalendar.cells}}" wx:for-item="dayCell" wx:key="date">
+                        <text wx:if="{{!dayCell.hasRecord}}">{{dayCell.day}}</text>
+                        <image wx:else class="member-calendar-sticker sticker-outline-small" src="{{dayCell.stickerPath}}" mode="aspectFit" webp />
+                        <text wx:if="{{dayCell.isToday}}" class="member-calendar-today-dot"></text>
+                      </view>
+                    </view>
+                    <view wx:if="{{memberCalendars.length > 1}}" class="member-calendar-dots"><text class="{{memberCalendarIndex === index ? 'member-calendar-dot-active' : ''}}" wx:for="{{memberCalendars}}" wx:key="memberInstanceId"></text></view>
+                  </view>
+                </swiper-item>
+              </swiper>
+            </view>
           </view>
           <view class="weekdays"><text wx:for="{{['周一','周二','周三','周四','周五','周六','周日']}}" wx:key="*this">{{item}}</text></view>
           <view id="month-calendar-grid" class="calendar-grid {{calendarTransitionClass}}" bindanimationend="onCalendarTransitionEnd">
@@ -35,7 +62,7 @@
               <text wx:if="{{!item.hasRecords || monthStickerPhase === 'sticker-hidden'}}" class="day-number">{{item.day}}</text>
               <view wx:if="{{item.hasRecords}}" class="calendar-stickers">
                 <view class="calendar-sticker-position slot-{{record.slot}}" wx:for="{{item.records}}" wx:for-item="record" wx:key="recordId">
-                  <view class="sticker-pop-wrapper {{monthStickerPhase === 'sticker-leaving' && !record.exitVisible ? 'sticker-hidden' : monthStickerPhase}}" style="animation-delay: {{monthStickerPhase === 'sticker-entering' ? record.popDelay : 0}}ms;">
+                  <view class="sticker-pop-wrapper {{record.motionPhase || (monthStickerPhase === 'sticker-leaving' && !record.exitVisible ? 'sticker-hidden' : monthStickerPhase)}}" style="animation-delay: {{(record.motionPhase === 'sticker-entering' || (!record.motionPhase && monthStickerPhase === 'sticker-entering')) ? record.popDelay : 0}}ms;">
                     <image class="calendar-sticker-content sticker-outline-small" src="{{record.stickerPath}}" mode="aspectFit" webp />
                   </view>
                 </view>
@@ -61,8 +88,10 @@
     </scroll-view>
   </view>
 
+  <view wx:if="{{memberCalendarOpen}}" class="member-calendar-page-dismiss" catchtap="closeMemberCalendar" role="button" aria-label="关闭单人日历"></view>
+
   <view wx:if="{{module && !loading}}" class="fixed-primary safe-bottom">
-    <button class="primary-button" bindtap="openTodayEditor">{{todayProcessingCheckinId ? '查看生成进度' : (todayRecord ? '编辑今日' : '记录今日')}}</button>
+    <button class="primary-button bottom-action-button" bindtap="openTodayEditor">{{todayProcessingCheckinId ? '查看生成进度' : (todayRecord ? '编辑今日' : '记录今日')}}</button>
   </view>
 
   <view wx:if="{{dateSheetOpen}}" class="sheet-overlay sheet-motion-overlay {{dateSheetClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeDateSheet">
@@ -80,7 +109,7 @@
       </scroll-view>
       <view wx:else class="date-empty"><text>{{dateMessage || '这一天还静悄悄的～'}}</text></view>
       <text wx:if="{{dateRecords.length && dateMessage}}" class="date-message">{{dateMessage}}</text>
-      <button wx:if="{{dateAction !== 'none'}}" class="primary-button date-action" bindtap="onDatePrimaryAction">{{dateActionText}}</button>
+      <button wx:if="{{dateAction !== 'none'}}" class="primary-button bottom-action-button date-action" bindtap="onDatePrimaryAction">{{dateActionText}}</button>
     </view>
   </view>
 
@@ -107,7 +136,7 @@
         <textarea class="remark-input" maxlength="100" value="{{editorRemark}}" placeholder="今天发生了什么小事..." placeholder-class="text-placeholder" auto-height bindinput="onRemarkInput" />
         <button wx:if="{{editorMode === 'edit'}}" class="delete-record" bindtap="deleteTodayRecord">删除今天的记录</button>
       </scroll-view>
-      <button class="primary-button editor-submit" disabled="{{editorMediaStatus !== 'ready' || saving}}" loading="{{saving}}" bindtap="submitRecord">{{editorSubmitText}}</button>
+      <button class="primary-button bottom-action-button editor-submit" disabled="{{editorMediaStatus !== 'ready' || saving}}" loading="{{saving}}" bindtap="submitRecord">{{editorSubmitText}}</button>
     </view>
   </view>
 

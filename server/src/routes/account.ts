@@ -48,7 +48,7 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
     const cursor = numericCursor(request.query.cursor);
     const [rows] = await pool.execute<NotificationRow[]>(
       `SELECT * FROM notification
-        WHERE user_id = ? ${unreadOnly ? 'AND is_read = 0' : ''} ${cursor ? 'AND notification_id < ?' : ''}
+        WHERE user_id = ? ${unreadOnly ? "AND is_read = 0 AND action_status <> 'resolved'" : ''} ${cursor ? 'AND notification_id < ?' : ''}
         ORDER BY notification_id DESC LIMIT 21`,
       cursor ? [user.userId, cursor] : [user.userId],
     );
@@ -58,8 +58,9 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
       type: row.type,
       title: row.title,
       content: row.content ?? '',
+      moduleId: row.module_id ? publicId('m', row.module_id) : null,
       relativeTimeLabel: relativeTime(row.created_at),
-      isRead: Boolean(row.is_read),
+      isRead: Boolean(row.is_read) || row.action_status === 'resolved',
       actionType: row.action_type,
       actionStatus: row.action_status,
       target: row.target_type && row.target_id ? { type: row.target_type, id: targetPublicId(row.target_type, row.target_id) } : null,
@@ -73,7 +74,8 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
   router.get('/notifications/unread-count', asyncRoute(async (request, response) => {
     const user = authUser(request);
     const [[row]] = await pool.execute<RowDataPacket[]>(
-      'SELECT COUNT(*) AS unread_count FROM notification WHERE user_id = ? AND is_read = 0',
+      `SELECT COUNT(*) AS unread_count FROM notification
+        WHERE user_id = ? AND is_read = 0 AND action_status <> 'resolved'`,
       [user.userId],
     );
     ok(response, { unreadCount: Number(row.unread_count) });
@@ -87,6 +89,19 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
         `UPDATE notification SET is_read = 1, read_at = UTC_TIMESTAMP(3), updated_at = UTC_TIMESTAMP(3)
           WHERE user_id = ? AND is_read = 0`,
         [user.userId],
+      );
+      await connection.execute(
+        `UPDATE module_inbox_item i
+          JOIN notification n ON n.target_id = i.target_id AND n.target_type = i.target_type
+            AND (n.target_type = 'join_application'
+              OR (n.type = 'member_change' AND i.type = 'member_change')
+              OR (n.type = 'makeup_result' AND i.type = 'makeup_result'))
+          LEFT JOIN join_application ja
+            ON i.target_type = 'join_application' AND ja.application_id = i.target_id
+           SET i.status = 'read', i.updated_at = UTC_TIMESTAMP(3)
+         WHERE n.user_id = ? AND i.recipient_user_id = ? AND i.status = 'unread'
+           AND NOT (i.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')`,
+        [user.userId, user.userId],
       );
       return { updatedCount: update.affectedRows };
     });
@@ -104,6 +119,20 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
         [notificationId, user.userId],
       );
       if (update.affectedRows !== 1) throw new AppError('NOTIFICATION_NOT_FOUND', '通知不存在', 404);
+      await connection.execute(
+        `UPDATE module_inbox_item i
+          JOIN notification n ON n.target_id = i.target_id AND n.target_type = i.target_type
+            AND (n.target_type = 'join_application'
+              OR (n.type = 'member_change' AND i.type = 'member_change')
+              OR (n.type = 'makeup_result' AND i.type = 'makeup_result'))
+          LEFT JOIN join_application ja
+            ON i.target_type = 'join_application' AND ja.application_id = i.target_id
+           SET i.status = 'read', i.updated_at = UTC_TIMESTAMP(3)
+         WHERE n.notification_id = ? AND n.user_id = ? AND i.recipient_user_id = ?
+           AND i.status = 'unread'
+           AND NOT (i.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')`,
+        [notificationId, user.userId, user.userId],
+      );
       return { notificationId: publicId('n', notificationId), isRead: true };
     });
     ok(response, result);

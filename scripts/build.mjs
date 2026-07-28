@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const sourceDir = join(root, 'src');
 const outputDir = join(root, 'dist');
+const packageManifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const watch = process.argv.includes('--watch');
 const apiModeArgument = process.argv.find((argument) => argument.startsWith('--api-mode='));
 const apiMode = apiModeArgument?.split('=')[1];
@@ -49,7 +50,7 @@ try {
 const releaseIdArgument = process.argv.find((argument) => argument.startsWith('--release-id='));
 const releaseId = releaseIdArgument?.slice('--release-id='.length)
   || process.env.RELEASE_ID
-  || `0.3.0-rc.1+${gitCommit}`;
+  || `${packageManifest.version}+${gitCommit}`;
 
 const modeLabels = {
   local: 'local Mock',

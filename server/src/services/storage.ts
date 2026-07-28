@@ -184,7 +184,7 @@ export class StorageService {
         <text x="80" y="105" font-family="sans-serif" font-size="54" font-weight="700" fill="#20231f">${title}</text>
         <text x="80" y="170" font-family="sans-serif" font-size="32" fill="#697069">${month} · 月度记录</text>
         <rect x="80" y="1260" width="920" height="2" fill="#d9ddd7"/>
-        <text x="80" y="1335" font-family="sans-serif" font-size="28" fill="#697069">记录我的一辈子</text>
+        <text x="80" y="1335" font-family="sans-serif" font-size="28" fill="#697069">Note4Seven · 七日记</text>
       </svg>`);
     const card = await sharp(background)
       .composite(composites)

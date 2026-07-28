@@ -129,12 +129,12 @@
 }
 
 .profile-edit-sheet .profile-save-button {
-  flex: 0 0 88rpx;
+  flex: 0 0 var(--bottom-action-height);
   width: 100%;
-  height: 88rpx;
+  height: var(--bottom-action-height);
   margin: auto 0 0;
   box-sizing: border-box;
-  display: block;
+  display: flex;
 }
 
 .identity-copy {

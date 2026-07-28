@@ -17,7 +17,7 @@
     <view class="record-card">
       <view class="record-heading">
         <view bindtap="openSelection"><text class="record-word">RECORD</text><text class="record-month">{{moduleName || '本月记录'}} · {{monthLabel}}</text></view>
-        <button bindtap="changeGroup">换一组</button>
+        <button bindtap="changeGroup" disabled="{{changingGroup}}" loading="{{changingGroup}}">{{changingGroup ? '' : '换一组'}}</button>
       </view>
       <view class="memory-grid">
         <view class="memory-cell" wx:for="{{stickers}}" wx:key="id"><view class="sticker-pop-wrapper {{stickerPhase}}" style="animation-delay: {{stickerPhase === 'sticker-entering' ? item.popDelay : 0}}ms;"><image class="sticker-outline-medium" src="{{item.path}}" mode="aspectFit" webp /></view></view>

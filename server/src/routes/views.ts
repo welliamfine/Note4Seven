@@ -145,19 +145,38 @@ export function viewRoutes(pool: Pool, storage: StorageService): Router {
     const itemId = dbId(request.params.itemId, 'inbox');
     const body = parseBody(writeBody, request);
     const result = await idempotent(pool, user.userId, 'inbox_read', body.clientRequestId, body, async (connection) => {
-      const [update] = await connection.execute<ResultSetHeader>(
-        `UPDATE module_inbox_item SET status = 'read', updated_at = UTC_TIMESTAMP(3)
-          WHERE item_id = ? AND recipient_user_id = ? AND status = 'unread'`,
+      await connection.execute<ResultSetHeader>(
+        `UPDATE module_inbox_item i
+          LEFT JOIN join_application ja
+            ON i.target_type = 'join_application' AND ja.application_id = i.target_id
+          LEFT JOIN makeup_approval ma
+            ON i.target_type = 'makeup_approval' AND ma.approval_id = i.target_id
+           SET i.status = 'read', i.updated_at = UTC_TIMESTAMP(3)
+         WHERE i.item_id = ? AND i.recipient_user_id = ? AND i.status = 'unread'
+           AND NOT (i.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')
+           AND NOT (i.target_type = 'makeup_approval' AND COALESCE(ma.status, 'pending') = 'pending')`,
         [itemId, user.userId],
       );
-      if (update.affectedRows === 0) {
-        const [exists] = await connection.execute<RowDataPacket[]>(
-          'SELECT item_id FROM module_inbox_item WHERE item_id = ? AND recipient_user_id = ?',
-          [itemId, user.userId],
+      const [items] = await connection.execute<RowDataPacket[]>(
+        'SELECT item_id, status FROM module_inbox_item WHERE item_id = ? AND recipient_user_id = ?',
+        [itemId, user.userId],
+      );
+      if (!items[0]) throw new AppError('INBOX_ITEM_NOT_FOUND', '待办不存在', 404);
+      const status = String(items[0].status);
+      if (status === 'read') {
+        await connection.execute(
+          `UPDATE notification n
+            JOIN module_inbox_item i ON i.target_id = n.target_id AND i.target_type = n.target_type
+              AND (i.target_type = 'join_application'
+                OR (i.type = 'member_change' AND n.type = 'member_change')
+                OR (i.type = 'makeup_result' AND n.type = 'makeup_result'))
+             SET n.is_read = 1, n.read_at = COALESCE(n.read_at, UTC_TIMESTAMP(3)), n.updated_at = UTC_TIMESTAMP(3)
+           WHERE i.item_id = ? AND i.recipient_user_id = ? AND n.user_id = ?
+             AND n.is_read = 0`,
+          [itemId, user.userId, user.userId],
         );
-        if (!exists[0]) throw new AppError('INBOX_ITEM_NOT_FOUND', '待办不存在', 404);
       }
-      return { itemId: publicId('inbox', itemId), status: 'read' };
+      return { itemId: publicId('inbox', itemId), status };
     });
     ok(response, result);
   }));
@@ -328,12 +347,18 @@ async function ensureMemoryCard(
       [moduleId, month, seed],
     );
     await connection.execute('DELETE FROM monthly_memory_card_item WHERE memory_card_id = ?', [cardId]);
-    for (const [index, record] of records.entries()) {
+    if (records.length) {
+      const values = records.flatMap((record, index) => [
+        cardId,
+        record.record_id,
+        record.member_instance_id,
+        index,
+      ]);
       await connection.execute(
         `INSERT INTO monthly_memory_card_item
            (memory_card_id, record_id, member_instance_id, display_order, is_anonymous)
-         VALUES (?, ?, ?, ?, 0)`,
-        [cardId, record.record_id, record.member_instance_id, index],
+         VALUES ${records.map(() => '(?, ?, ?, ?, 0)').join(', ')}`,
+        values,
       );
     }
     return cardId;
@@ -341,33 +366,37 @@ async function ensureMemoryCard(
 }
 
 async function memoryCard(pool: Pool, storage: StorageService, moduleId: string, userId: string, month: string) {
-  const [moduleRows] = await pool.execute<RowDataPacket[]>('SELECT name FROM life_module WHERE module_id = ?', [moduleId]);
-  const [cards] = await pool.execute<RowDataPacket[]>(
-    `SELECT memory_card_id, status, generated_image_file_key FROM monthly_memory_card
-      WHERE module_id = ? AND user_id = ? AND month_key = ? LIMIT 1`,
-    [moduleId, userId, month],
-  );
+  const [[moduleRows], [cards]] = await Promise.all([
+    pool.execute<RowDataPacket[]>('SELECT name FROM life_module WHERE module_id = ?', [moduleId]),
+    pool.execute<RowDataPacket[]>(
+      `SELECT memory_card_id, status, generated_image_file_key FROM monthly_memory_card
+        WHERE module_id = ? AND user_id = ? AND month_key = ? LIMIT 1`,
+      [moduleId, userId, month],
+    ),
+  ]);
   const card = cards[0];
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT r.record_id, ma.sticker_thumbnail_file_key
-       FROM monthly_memory_card_item mci
-       JOIN life_record r ON r.record_id = mci.record_id
-       JOIN media_asset ma ON ma.media_id = r.media_id
-      WHERE mci.memory_card_id = ? ORDER BY mci.display_order`,
-    [card.memory_card_id],
-  );
+  const [[rows], [[stats]]] = await Promise.all([
+    pool.execute<RowDataPacket[]>(
+      `SELECT r.record_id, ma.sticker_thumbnail_file_key
+         FROM monthly_memory_card_item mci
+         JOIN life_record r ON r.record_id = mci.record_id
+         JOIN media_asset ma ON ma.media_id = r.media_id
+        WHERE mci.memory_card_id = ? ORDER BY mci.display_order`,
+      [card.memory_card_id],
+    ),
+    pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(DISTINCT CASE WHEN s.is_all_completed = 1 THEN s.record_date END) AS joint_days,
+              (SELECT COUNT(*) FROM reaction re JOIN life_record rr ON rr.record_id = re.record_id
+                WHERE rr.module_id = ? AND rr.user_id = ? AND DATE_FORMAT(rr.record_date, '%Y-%m') = ? AND re.status = 'active') AS reactions
+         FROM daily_module_snapshot s WHERE s.module_id = ? AND DATE_FORMAT(s.record_date, '%Y-%m') = ?`,
+      [moduleId, userId, month, moduleId, month],
+    ),
+  ]);
   const items = await Promise.all(rows.map(async (row, index) => ({
     displayOrder: index,
     recordId: publicId('r', row.record_id),
     stickerThumbnailUrl: await storage.signedUrl(String(row.sticker_thumbnail_file_key)),
   })));
-  const [[stats]] = await pool.execute<RowDataPacket[]>(
-    `SELECT COUNT(DISTINCT CASE WHEN s.is_all_completed = 1 THEN s.record_date END) AS joint_days,
-            (SELECT COUNT(*) FROM reaction re JOIN life_record rr ON rr.record_id = re.record_id
-              WHERE rr.module_id = ? AND rr.user_id = ? AND DATE_FORMAT(rr.record_date, '%Y-%m') = ? AND re.status = 'active') AS reactions
-       FROM daily_module_snapshot s WHERE s.module_id = ? AND DATE_FORMAT(s.record_date, '%Y-%m') = ?`,
-    [moduleId, userId, month, moduleId, month],
-  );
   return {
     memoryCardId: publicId('mc', card.memory_card_id),
     moduleId: publicId('m', moduleId),
@@ -414,7 +443,7 @@ function isoWeekRange(value: string): { start: string; end: string } {
 }
 
 function targetId(type: string, id: string): string {
-  const prefixes: Record<string, string> = { makeup_approval: 'ma', record: 'r', member: 'mi', module: 'm' };
+  const prefixes: Record<string, string> = { join_application: 'ja', makeup_approval: 'ma', record: 'r', member: 'mi', module: 'm' };
   return publicId(prefixes[type] ?? type, id);
 }
 

@@ -178,7 +178,7 @@ export interface JoinApplication {
 export interface AppNotification {
   notificationId: string;
   userId: string;
-  type: 'join_application' | 'join_result' | 'member_removed' | 'creator_transferred' | 'reaction' | 'makeup_result' | 'module_state' | 'reminder' | 'account';
+  type: 'join_application' | 'join_result' | 'member_change' | 'member_removed' | 'creator_transferred' | 'reaction' | 'makeup_result' | 'module_state' | 'reminder' | 'account';
   title: string;
   content: string;
   moduleId?: string;
@@ -196,10 +196,10 @@ export interface ModuleInboxItem {
   itemId: string;
   moduleId: string;
   recipientUserId: string;
-  type: 'makeup_approval' | 'makeup_result' | 'member_change' | 'module_state' | 'reaction';
+  type: 'join_application' | 'makeup_approval' | 'makeup_result' | 'member_change' | 'module_state' | 'reaction';
   title: string;
   content: string;
-  targetType: 'makeup_approval' | 'record' | 'member' | 'module';
+  targetType: 'join_application' | 'makeup_approval' | 'record' | 'member' | 'module';
   targetId: string;
   recordDate?: string;
   status: 'unread' | 'read' | 'resolved' | 'expired';
@@ -249,12 +249,15 @@ export interface AppDatabase {
 
 export interface StickerPreview {
   recordId: string;
+  memberInstanceId?: string;
   stickerPath: string;
   displayOrder: number;
 }
 
 export interface HomeModuleView extends LifeModule {
   pinned: boolean;
+  unreadInboxCount: number;
+  lastActivityAt?: string;
   todayPreviewItems: StickerPreview[];
 }
 

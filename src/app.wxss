@@ -32,6 +32,9 @@ page {
   --cell-reveal-duration: 320ms;
   --cell-overshoot-scale: 1.015;
   --sheet-motion-duration: 500ms;
+  --bottom-action-height: 104rpx;
+  --bottom-action-radius: 52rpx;
+  --bottom-action-padding: 28rpx;
   background-color: var(--canvas);
   color: var(--ink);
   font-family: var(--font-family-base);
@@ -239,6 +242,16 @@ button:active {
   background: rgba(229, 225, 219, 0.78);
   color: var(--text-color-muted);
   box-shadow: none;
+}
+
+.primary-button.bottom-action-button {
+  min-width: 0;
+  height: var(--bottom-action-height);
+  padding: 0 var(--bottom-action-padding);
+  border-radius: var(--bottom-action-radius);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  text-align: center;
 }
 
 .secondary-button {
