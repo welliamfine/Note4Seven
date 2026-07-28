@@ -1,12 +1,31 @@
-import { getModuleGallery, type GalleryItem, type GalleryView } from '../../services/api';
+import type { GalleryItem, GalleryView } from '../../services/api';
+import { loadModuleGalleryCached } from '../../services/gallery-cache';
 import { track } from '../../services/tracker';
 import { monthLabel, monthOf, nextMonth, previousMonth, shanghaiDate } from '../../utils/date';
+import { preloadImageSources } from '../../utils/image-preload';
 import { waitForSheetMotion } from '../../utils/sheet-motion';
+import { createStickerDelays, STICKER_MOTION, waitForAppRouteDone } from '../../utils/sticker-motion';
 import { drawStickerWithOutline, fitStickerWithin } from '../../utils/sticker-outline';
 
 const STICKER_PREVIEW_WIDTH = 750;
 const STICKER_PREVIEW_HEIGHT = 1000;
 const STICKER_PREVIEW_PADDING = 40;
+
+interface AnimatedGalleryItem extends GalleryItem {
+  popDelay: number;
+}
+
+type AnimatedGalleryView = Omit<GalleryView, 'items'> & { items: AnimatedGalleryItem[] };
+
+let galleryTimers: Array<ReturnType<typeof setTimeout>> = [];
+let galleryLoadToken = 0;
+const galleryCache = new Map<string, GalleryView>();
+
+const galleryCacheKey = (moduleId: string, month: string) => `${moduleId}:${month}`;
+const clearGalleryTimers = () => {
+  galleryTimers.forEach((timer) => clearTimeout(timer));
+  galleryTimers = [];
+};
 
 Page({
   data: {
@@ -15,7 +34,10 @@ Page({
     month: monthOf(shanghaiDate()),
     monthLabel: monthLabel(monthOf(shanghaiDate())),
     loading: true,
-    view: null as GalleryView | null,
+    initialShowPending: true,
+    view: null as AnimatedGalleryView | null,
+    stickerPhase: 'sticker-hidden',
+    stickerFinalDelay: 0,
     selected: null as GalleryItem | null,
     previewClosing: false,
     previewingSticker: false,
@@ -28,17 +50,71 @@ Page({
       monthLabel: monthLabel(query.month ?? monthOf(shanghaiDate())),
       statusBarHeight: wx.getWindowInfo?.().statusBarHeight ?? 24,
     });
+    void this.load();
   },
-  onShow() { void this.load(); },
+  onShow() {
+    if (this.data.initialShowPending) {
+      this.setData({ initialShowPending: false });
+      return;
+    }
+    if (this.data.view) void this.playStickerAnimation(true);
+    else void this.load();
+  },
+  onHide() {
+    clearGalleryTimers();
+    if (this.data.view) this.setData({ stickerPhase: 'sticker-visible' });
+  },
+  onUnload() {
+    galleryLoadToken += 1;
+    clearGalleryTimers();
+  },
   async load() {
-    this.setData({ loading: true });
+    const token = ++galleryLoadToken;
+    clearGalleryTimers();
+    const key = galleryCacheKey(this.data.moduleId, this.data.month);
+    const cached = galleryCache.get(key);
+    if (!cached) this.setData({ loading: true });
     try {
-      const view = await getModuleGallery(this.data.moduleId, this.data.month);
-      this.setData({ view, loading: false, monthLabel: monthLabel(this.data.month), canNext: this.data.month < monthOf(shanghaiDate()) });
+      const view = cached ?? await loadModuleGalleryCached(this.data.moduleId, this.data.month);
+      if (token !== galleryLoadToken) return;
+      galleryCache.set(key, view);
+      const plan = createStickerDelays(view.items.map((item) => item.recordId));
+      const animatedView: AnimatedGalleryView = {
+        ...view,
+        items: view.items.map((item) => ({
+          ...item,
+          popDelay: plan.delays.get(item.recordId) ?? 0,
+        })),
+      };
+      this.setData({
+        view: animatedView,
+        loading: false,
+        stickerPhase: 'sticker-hidden',
+        stickerFinalDelay: plan.finalDelay,
+        monthLabel: monthLabel(this.data.month),
+        canNext: this.data.month < monthOf(shanghaiDate()),
+      });
+      await preloadImageSources(view.items.map((item) => item.stickerPath), 2_500);
+      if (token !== galleryLoadToken) return;
+      await this.playStickerAnimation();
     } catch {
+      if (token !== galleryLoadToken) return;
       this.setData({ loading: false });
       wx.showToast({ title: '图片合集加载失败', icon: 'none' });
     }
+  },
+  async playStickerAnimation(waitForRoute = false) {
+    clearGalleryTimers();
+    this.setData({ stickerPhase: 'sticker-hidden' });
+    if (waitForRoute) await waitForAppRouteDone(180);
+    galleryTimers.push(setTimeout(
+      () => this.setData({ stickerPhase: 'sticker-entering' }),
+      STICKER_MOTION.pageSettledDelay,
+    ));
+    galleryTimers.push(setTimeout(
+      () => this.setData({ stickerPhase: 'sticker-visible' }),
+      STICKER_MOTION.pageSettledDelay + this.data.stickerFinalDelay + STICKER_MOTION.duration,
+    ));
   },
   goBack() { void wx.navigateBack(); },
   previousMonth() { this.setData({ month: previousMonth(this.data.month), selected: null }, () => void this.load()); },

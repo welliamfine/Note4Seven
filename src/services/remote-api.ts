@@ -1,4 +1,5 @@
 import { SUBSCRIBE_TEMPLATE_ID } from '../config/runtime';
+import { getDefaultTemplateCopy } from '../config/module-templates';
 import type {
   AccountDeletionRequest,
   CalendarCell,
@@ -27,6 +28,7 @@ import type {
   GalleryView,
   InvitePreview,
   MemberManagementView,
+  MemoryModuleOption,
   MemoryView,
   ModuleInboxView,
   NotificationView,
@@ -50,6 +52,8 @@ const makeupCache = new Map<string, MakeupApproval>();
 const inboxCountCache = new Map<string, number>();
 const monthSummaryCache = new Map<string, { currentUserRecordedDays: number; jointCompletedDays: number; receivedReactionCount: number }>();
 const preparedMediaCache = new Map<string, PreparedMediaFile>();
+let memoryModuleOptionsCache: MemoryModuleOption[] = [];
+let weeklyMemoryOverviewCache: { week: string; view: Json } | null = null;
 interface MediaReservation {
   mediaId: string;
   upload: { cloudPath: string };
@@ -77,6 +81,15 @@ function member(raw: Json): ModuleMember {
     joinedAt: String(raw.joinedAt ?? shanghaiNowIso()),
     active: true,
   };
+}
+
+function belongsToActiveMember(memberInstanceId: unknown, activeMemberIds: Set<string>): boolean {
+  if (memberInstanceId === undefined || memberInstanceId === null || memberInstanceId === '') return true;
+  const normalizedId = String(memberInstanceId);
+  if (normalizedId === 'undefined' || normalizedId === 'null') return true;
+  if (activeMemberIds.has(normalizedId)) return true;
+  const databaseId = normalizedId.replace(/^mi_/, '');
+  return [...activeMemberIds].some((activeId) => activeId.replace(/^mi_/, '') === databaseId);
 }
 
 function mapRecord(raw: Json): LifeRecord {
@@ -122,6 +135,7 @@ async function moduleFromDetail(moduleId: string): Promise<LifeModule> {
 }
 
 export async function getCurrentUser(): Promise<User> {
+  if (currentUserCache) return currentUserCache;
   const result = await remoteRequest<Json>('/users/me');
   const nickname = String(result.nickname ?? '微信用户');
   currentUserCache = { userId: String(result.userId), nickname, ...avatar(nickname, result.avatarUrl) };
@@ -134,12 +148,37 @@ export async function getProfileOverview(): Promise<ProfileOverview> {
   const nickname = String(result.nickname ?? '微信用户');
   currentUserCache = { userId: String(result.userId), nickname, ...avatar(nickname, result.avatarUrl) };
   unreadNotificationCount = Number(result.unreadNotificationCount ?? 0);
+  if (unreadNotificationCount > 0) {
+    unreadNotificationCount = await reconcileResolvedUnreadNotifications(unreadNotificationCount);
+  }
   return {
     user: currentUserCache,
     recordedDays: Number(result.recordedDays ?? 0),
     moduleCount: Number(result.activeModuleCount ?? 0),
     unreadCount: unreadNotificationCount,
   };
+}
+
+async function reconcileResolvedUnreadNotifications(serverUnreadCount: number): Promise<number> {
+  let cursor = '';
+  let resolvedUnreadCount = 0;
+  try {
+    do {
+      const query = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+      const result = await remoteRequest<Json>(`/notifications?unreadOnly=true${query}`);
+      const items = (result.items ?? []) as Json[];
+      const resolvedUnread = items.filter((item) => item.actionStatus === 'resolved' && !item.isRead);
+      await Promise.all(resolvedUnread.map((item) => remoteRequest(`/notifications/${String(item.notificationId)}/read`, {
+        method: 'POST',
+        data: { clientRequestId: createId('notice_reconcile') },
+      })));
+      resolvedUnreadCount += resolvedUnread.length;
+      cursor = result.hasMore && result.nextCursor ? String(result.nextCursor) : '';
+    } while (cursor);
+  } catch {
+    // Keep profile loading independent from best-effort repair of legacy notification state.
+  }
+  return Math.max(0, serverUnreadCount - resolvedUnreadCount);
 }
 
 export async function updateCurrentUserProfile(input: UpdateCurrentUserProfileInput): Promise<User> {
@@ -160,30 +199,70 @@ export async function updateCurrentUserProfile(input: UpdateCurrentUserProfileIn
 export async function getTemplates(): Promise<ModuleTemplate[]> {
   const result = await remoteRequest<Json>('/module-templates');
   const stickers = ['/assets/stickers/group-1.png', '/assets/stickers/group-3.png', '/assets/stickers/group-4.png', '/assets/stickers/group-5.png'];
-  return (result.items as Json[]).map((item, index) => ({
-    templateId: String(item.templateId), name: String(item.name), description: String(item.description ?? ''), stickerPath: stickers[index % stickers.length],
-  }));
+  return (result.items as Json[]).map((item, index) => {
+    const templateId = String(item.templateId);
+    const copy = getDefaultTemplateCopy(templateId, index);
+    return {
+      templateId,
+      name: copy?.name ?? String(item.name),
+      description: copy?.description ?? String(item.description ?? ''),
+      stickerPath: stickers[index % stickers.length],
+    };
+  });
 }
 
-export async function getHomeModules(): Promise<{ pinned: HomeModuleView[]; normal: HomeModuleView[] }> {
+export async function getHomeModules(
+  options: { reconcileNotifications?: boolean } = {},
+): Promise<{ pinned: HomeModuleView[]; normal: HomeModuleView[] }> {
   const result = await remoteRequest<Json>('/home/modules');
   const groups = result.groups as Json[];
   const map = (raw: Json): HomeModuleView => {
     const members = (raw.activeMembers as Json[]).map(member);
+    const activeMemberIds = new Set(members.map((item) => item.memberInstanceId));
     const module: HomeModuleView = {
       moduleId: String(raw.moduleId), name: String(raw.moduleName), description: String(raw.description ?? ''),
       mode: raw.mode === 'group' ? 'group' : 'solo', status: raw.status, creatorUserId: String(raw.creatorUserId ?? members.find((item) => item.role === 'creator')?.userId ?? ''),
-      createdAt: String(raw.createdAt), updatedAt: String(raw.updatedAt), members, version: Number(raw.version ?? 0),
+      createdAt: String(raw.createdAt), updatedAt: String(raw.updatedAt), lastActivityAt: String(raw.lastActivityAt ?? raw.updatedAt), members, version: Number(raw.version ?? 0),
       pinned: Boolean(raw.isPinned),
-      todayPreviewItems: (raw.todayPreviewItems as Json[]).map((item) => ({ recordId: String(item.recordId), stickerPath: String(item.stickerThumbnailUrl), displayOrder: Number(item.displayOrder) })),
+      unreadInboxCount: Number(raw.unreadInboxCount ?? 0),
+      todayPreviewItems: (raw.todayPreviewItems as Json[])
+        .filter((item) => belongsToActiveMember(item.memberInstanceId, activeMemberIds))
+        .map((item, index) => ({
+          recordId: String(item.recordId),
+          memberInstanceId: item.memberInstanceId ? String(item.memberInstanceId) : undefined,
+          stickerPath: String(item.stickerThumbnailUrl),
+          displayOrder: index,
+        })),
     };
     moduleCache.set(module.moduleId, module);
     return module;
   };
-  return {
+  const view = {
     pinned: (groups.find((item) => item.groupType === 'pinned')?.items ?? []).map(map),
     normal: (groups.find((item) => item.groupType === 'normal')?.items ?? []).map(map),
   };
+  const modules = [...view.pinned, ...view.normal];
+  memoryModuleOptionsCache = modules.map((module) => ({ moduleId: module.moduleId, name: module.name }));
+  if (options.reconcileNotifications === false) {
+    modules.forEach((module) => inboxCountCache.set(module.moduleId, module.unreadInboxCount));
+    return view;
+  }
+  const notifications = await getNotifications().catch(() => [] as NotificationView[]);
+  const modulesWithUnreadJoinApplications = new Set(notifications
+    .filter((item) => item.targetType === 'join_application' && item.application?.status === 'pending' && item.moduleId)
+    .map((item) => item.moduleId!));
+  modules
+    .filter((module) => !modulesWithUnreadJoinApplications.has(module.moduleId))
+    .forEach((module) => inboxCountCache.set(module.moduleId, module.unreadInboxCount));
+  await Promise.all(modules.filter((module) => modulesWithUnreadJoinApplications.has(module.moduleId)).map(async (module) => {
+    try {
+      const items = await loadModuleInbox(module.moduleId, notifications);
+      module.unreadInboxCount = items.filter((item) => item.status === 'unread').length;
+    } catch {
+      inboxCountCache.set(module.moduleId, module.unreadInboxCount);
+    }
+  }));
+  return view;
 }
 
 export async function setModulePinned(moduleId: string, pinned: boolean): Promise<void> {
@@ -208,13 +287,17 @@ export async function createModule(input: CreateModuleInput): Promise<LifeModule
 }
 
 export async function getModule(moduleId: string): Promise<LifeModule> {
+  return moduleCache.get(moduleId) ?? moduleFromDetail(moduleId);
+}
+
+export async function refreshModule(moduleId: string): Promise<LifeModule> {
   return moduleFromDetail(moduleId);
 }
 
 export async function getCalendar(moduleId: string, month: string): Promise<CalendarCell[]> {
   const [result, module] = await Promise.all([
     remoteRequest<Json>(`/modules/${moduleId}/calendar?month=${encodeURIComponent(month)}`),
-    moduleFromDetail(moduleId),
+    moduleCache.get(moduleId) ?? moduleFromDetail(moduleId),
   ]);
   const dayByDate = new Map((result.days as Json[]).map((day) => [String(day.date), day]));
   return buildMonthGrid(month).map((cell) => {
@@ -240,8 +323,14 @@ export async function getCalendar(moduleId: string, month: string): Promise<Cale
 }
 
 export async function getDateRecords(moduleId: string, recordDate: string): Promise<LifeRecord[]> {
-  const result = await remoteRequest<Json>(`/modules/${moduleId}/dates/${recordDate}`);
-  return (result.records as Json[]).map(mapRecord);
+  const [result, module] = await Promise.all([
+    remoteRequest<Json>(`/modules/${moduleId}/dates/${recordDate}`),
+    moduleFromDetail(moduleId),
+  ]);
+  const records = (result.records as Json[]).map(mapRecord);
+  if (recordDate !== shanghaiDate()) return records;
+  const activeMemberIds = new Set(module.members.map((member) => member.memberInstanceId));
+  return records.filter((record) => belongsToActiveMember(record.memberInstanceId, activeMemberIds));
 }
 
 export async function getCurrentMakeupApproval(moduleId: string, recordDate: string): Promise<MakeupApproval | undefined> {
@@ -446,7 +535,7 @@ export async function getNotifications(): Promise<NotificationView[]> {
     const application = target?.type === 'join_application' ? mapApplication(await remoteRequest<Json>(`/join-applications/${target.id}`)) : undefined;
     return {
       notificationId: String(item.notificationId), userId: currentUserCache?.userId ?? '', type: item.type === 'join_application_created' ? 'join_application' : item.type,
-      title: String(item.title), content: String(item.content ?? ''), moduleId: application?.moduleId,
+      title: String(item.title), content: String(item.content ?? ''), moduleId: application?.moduleId ?? (item.moduleId ? String(item.moduleId) : undefined),
       targetType: target?.type, targetId: target?.id, recordDate: item.recordDate ?? undefined,
       actionType: item.actionType, actionStatus: item.actionStatus, isRead: Boolean(item.isRead), createdAt: String(item.createdAt), updatedAt: String(item.createdAt),
       moduleName: '', application,
@@ -455,6 +544,15 @@ export async function getNotifications(): Promise<NotificationView[]> {
 }
 
 export function getUnreadNotificationCount(): number { return unreadNotificationCount; }
+
+export async function refreshUnreadNotificationCount(): Promise<number> {
+  const result = await remoteRequest<Json>('/notifications/unread-count');
+  unreadNotificationCount = Number(result.unreadCount ?? 0);
+  if (unreadNotificationCount > 0) {
+    unreadNotificationCount = await reconcileResolvedUnreadNotifications(unreadNotificationCount);
+  }
+  return unreadNotificationCount;
+}
 
 export async function markNotificationRead(notificationId: string): Promise<void> {
   await remoteRequest(`/notifications/${notificationId}/read`, { method: 'POST', data: { clientRequestId: createId('notice_read') } });
@@ -523,23 +621,70 @@ async function getApproval(approvalId: string): Promise<MakeupApproval> {
 }
 
 export async function getModuleInbox(moduleId: string): Promise<ModuleInboxView[]> {
+  const notifications = await getNotifications().catch(() => [] as NotificationView[]);
+  return loadModuleInbox(moduleId, notifications);
+}
+
+async function loadModuleInbox(moduleId: string, notifications: NotificationView[]): Promise<ModuleInboxView[]> {
   const result = await remoteRequest<Json>(`/modules/${moduleId}/inbox`);
-  const items = await Promise.all((result.items as Json[]).map(async (item): Promise<ModuleInboxView> => {
+  const serverItems = await Promise.all((result.items as Json[]).map(async (item): Promise<ModuleInboxView> => {
     const approval = item.targetType === 'makeup_approval' ? await getApproval(String(item.targetId)) : undefined;
+    const application = item.targetType === 'join_application'
+      ? mapApplication(await remoteRequest<Json>(`/join-applications/${String(item.targetId)}`))
+      : undefined;
+    const notification = notifications.find((candidate) => candidate.moduleId === moduleId
+      && candidate.targetType === item.targetType && candidate.targetId === String(item.targetId));
     return {
       itemId: String(item.itemId), moduleId, recipientUserId: currentUserCache?.userId ?? '', type: item.type, title: String(item.title), content: String(item.content),
       targetType: item.targetType, targetId: String(item.targetId), recordDate: item.recordDate ?? undefined, status: item.status,
-      createdAt: String(item.createdAt), updatedAt: String(item.createdAt), expireAt: String(item.expireAt), approval,
+      createdAt: String(item.createdAt), updatedAt: String(item.createdAt), expireAt: String(item.expireAt), approval, application,
+      notificationId: notification?.notificationId,
     } as ModuleInboxView;
   }));
+  const representedApplications = new Set(serverItems
+    .filter((item) => item.targetType === 'join_application')
+    .map((item) => item.targetId));
+  const syntheticItems = notifications
+    .filter((notification) => notification.moduleId === moduleId && notification.targetType === 'join_application'
+      && notification.targetId && notification.application && !representedApplications.has(notification.targetId))
+    .map((notification): ModuleInboxView => ({
+      itemId: `notification:${notification.notificationId}`,
+      moduleId,
+      recipientUserId: currentUserCache?.userId ?? '',
+      type: 'join_application',
+      title: notification.title,
+      content: notification.content,
+      targetType: 'join_application',
+      targetId: notification.targetId!,
+      status: notification.application!.status === 'pending'
+        ? 'unread'
+        : notification.actionStatus === 'resolved' ? 'read' : notification.isRead ? 'read' : 'unread',
+      createdAt: notification.createdAt,
+      updatedAt: notification.updatedAt,
+      expireAt: notification.application!.expireAt,
+      application: notification.application,
+      notificationId: notification.notificationId,
+    }));
+  const items = [...serverItems, ...syntheticItems]
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   inboxCountCache.set(moduleId, items.filter((item) => item.status === 'unread').length);
   return items;
 }
 
 export function getModuleInboxCount(moduleId: string): number { return inboxCountCache.get(moduleId) ?? 0; }
 
-export async function markModuleInboxRead(itemId: string): Promise<void> {
-  await remoteRequest(`/module-inbox-items/${itemId}/read`, { method: 'POST', data: { clientRequestId: createId('inbox_read') } });
+export async function markModuleInboxRead(itemId: string, notificationId?: string, moduleId?: string): Promise<void> {
+  const syntheticNotificationId = itemId.startsWith('notification:') ? itemId.slice('notification:'.length) : '';
+  if (syntheticNotificationId) {
+    await markNotificationRead(syntheticNotificationId);
+  } else {
+    const result = await remoteRequest<Json>(`/module-inbox-items/${itemId}/read`, {
+      method: 'POST', data: { clientRequestId: createId('inbox_read') },
+    });
+    if (result.status !== 'read') return;
+    if (notificationId) await markNotificationRead(notificationId);
+  }
+  if (moduleId) inboxCountCache.set(moduleId, Math.max(0, (inboxCountCache.get(moduleId) ?? 0) - 1));
 }
 
 export async function resolveMakeupApproval(approvalId: string, action: 'approve' | 'reject'): Promise<MakeupApproval> {
@@ -556,7 +701,10 @@ export async function updateModuleInfo(moduleId: string, name: string, descripti
 }
 
 export async function getModuleGallery(moduleId: string, month: string): Promise<GalleryView> {
-  const [result, module] = await Promise.all([remoteRequest<Json>(`/modules/${moduleId}/gallery?month=${month}`), moduleFromDetail(moduleId)]);
+  const [result, module] = await Promise.all([
+    remoteRequest<Json>(`/modules/${moduleId}/gallery?month=${month}`),
+    moduleCache.get(moduleId) ?? moduleFromDetail(moduleId),
+  ]);
   return {
     moduleId, moduleName: module.name, month,
     items: (result.items as Json[]).map((item) => ({
@@ -590,8 +738,14 @@ export async function updateModuleReminder(moduleId: string, input: UpdateRemind
 
 export function runInAppReminderScan(): number { return 0; }
 
-export async function deleteModuleToRecycle(moduleId: string, confirmationName: string): Promise<void> {
-  await remoteRequest(`/modules/${moduleId}/delete`, { method: 'POST', data: { confirmationName, clientRequestId: createId('module_delete') } });
+export async function deleteModuleToRecycle(moduleId: string, confirmationName?: string): Promise<void> {
+  await remoteRequest(`/modules/${moduleId}/delete`, {
+    method: 'POST',
+    data: {
+      ...(confirmationName ? { confirmationName } : {}),
+      clientRequestId: createId('module_delete'),
+    },
+  });
   moduleCache.delete(moduleId);
 }
 
@@ -618,16 +772,30 @@ function isoWeek(date = new Date()): string {
 }
 
 export async function getMemoryView(moduleId?: string, month = shanghaiDate().slice(0, 7), forceChange = false): Promise<MemoryView> {
-  const home = await getHomeModules();
-  const modules = [...home.pinned, ...home.normal];
-  const selected = modules.find((item) => item.moduleId === moduleId) ?? modules[0];
+  const week = isoWeek();
+  const cachedSelected = moduleId ? moduleCache.get(moduleId) : undefined;
+  const canReuseModuleContext = forceChange
+    && cachedSelected
+    && memoryModuleOptionsCache.some((item) => item.moduleId === moduleId);
+  let moduleOptions = memoryModuleOptionsCache;
+  let selected = cachedSelected;
+  if (!canReuseModuleContext) {
+    const home = await getHomeModules();
+    const modules = [...home.pinned, ...home.normal];
+    selected = modules.find((item) => item.moduleId === moduleId) ?? modules[0];
+    moduleOptions = modules.map((item) => ({ moduleId: item.moduleId, name: item.name }));
+  }
   if (!selected) throw new Error('NO_ACTIVE_MODULE');
+  const weeklyPromise = forceChange && weeklyMemoryOverviewCache?.week === week
+    ? Promise.resolve(weeklyMemoryOverviewCache.view)
+    : remoteRequest<Json>(`/memories/weekly-overview?week=${week}`);
   const [weekly, card] = await Promise.all([
-    remoteRequest<Json>(`/memories/weekly-overview?week=${isoWeek()}`),
+    weeklyPromise,
     forceChange
       ? remoteRequest<Json>('/memories/monthly-card/change-group', { method: 'POST', data: { moduleId: selected.moduleId, month, clientRequestId: createId('memory_group') } })
       : remoteRequest<Json>(`/memories/monthly-card?moduleId=${selected.moduleId}&month=${month}`),
   ]);
+  weeklyMemoryOverviewCache = { week, view: weekly };
   const summary = {
     currentUserRecordedDays: Number(card.currentUserRecordedDays ?? 0), jointCompletedDays: Number(card.jointCompletedDays ?? 0), receivedReactionCount: Number(card.receivedReactionCount ?? 0),
   };
@@ -636,7 +804,7 @@ export async function getMemoryView(moduleId?: string, month = shanghaiDate().sl
   return {
     recordedDays: Number(weekly.recordedDays), participatedModuleCount: Number(weekly.participatedModuleCount), jointCompletedDays: Number(weekly.jointCompletedDays),
     currentStreakDays: Number(weekly.currentStreakDays), receivedReactionCount: Number(weekly.receivedReactionCount), weeklyRecordCount: Number(weekly.weeklyRecordCount),
-    moduleId: selected.moduleId, moduleName: selected.name, month, modules: modules.map((item) => ({ moduleId: item.moduleId, name: item.name })),
+    moduleId: selected.moduleId, moduleName: selected.name, month, modules: moduleOptions,
     items: (card.items as Json[]).map((item) => ({ recordId: String(item.recordId), stickerPath: String(item.stickerThumbnailUrl), displayOrder: Number(item.displayOrder) })),
     monthlyJointCompletedDays: Number(card.jointCompletedDays), monthlyReceivedReactionCount: Number(card.receivedReactionCount), mostUsedEmoji: emojiMap[String(card.mostUsedEmojiCode)] ?? '—',
   };

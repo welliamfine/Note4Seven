@@ -19,11 +19,7 @@ const files = await walk(dist);
 const sourceFiles = await walk(source);
 const failures = [];
 const allowedFontSizes = new Set([20, 24, 28, 32, 36]);
-const decorativeFontSizes = new Map([
-  ['subpackages/member-management/index.wxss', new Set([90])],
-  ['subpackages/invite-share/index.wxss', new Set([116])],
-  ['subpackages/invite-intro/index.wxss', new Set([124])],
-]);
+const decorativeFontSizes = new Map();
 const allowedFontWeights = new Set(['400', 'var(--font-weight-regular)']);
 const normalizeCssValue = (value) => value.replaceAll(/\s+/g, '').toLowerCase();
 const sharedTextColors = new Set([
@@ -45,6 +41,16 @@ const textColorExceptions = new Map([
   ])],
   ['subpackages/module-detail/index.wxss', new Set(['#48433e', '#746e68', '#524d47', '#9a8c80', '#817a72'])],
 ].map(([path, values]) => [path, new Set([...values].map(normalizeCssValue))]));
+const expectedBottomActionCounts = new Map([
+  ['pages/home/index.wxml', 2],
+  ['pages/profile/index.wxml', 1],
+  ['subpackages/invite-intro/index.wxml', 1],
+  ['subpackages/invite-share/index.wxml', 2],
+  ['subpackages/member-management/index.wxml', 2],
+  ['subpackages/module-detail/index.wxml', 3],
+  ['subpackages/module-gallery/index.wxml', 2],
+  ['subpackages/module-settings/index.wxml', 1],
+]);
 
 for (const file of files.filter((item) => extname(item) === '.json')) {
   try {
@@ -111,6 +117,7 @@ for (const file of files.filter((item) => extname(item) === '.wxml')) {
 
 for (const file of sourceFiles.filter((item) => extname(item) === '.wxml')) {
   const template = await readFile(file, 'utf8');
+  const relativePath = relative(source, file).replaceAll('\\', '/');
   const placeholderControls = [...template.matchAll(/<(?:input|textarea)\b[^>]*\bplaceholder="[^"]*"[^>]*>/g)].map((match) => match[0]);
   placeholderControls.forEach((control) => {
     if (!control.includes('placeholder-class="text-placeholder"')) {
@@ -129,6 +136,14 @@ for (const file of sourceFiles.filter((item) => extname(item) === '.wxml')) {
       failures.push(`Missing sticker outline class in ${file}: ${image}`);
     }
   });
+
+  const expectedBottomActionCount = expectedBottomActionCounts.get(relativePath);
+  if (expectedBottomActionCount !== undefined) {
+    const actualBottomActionCount = [...template.matchAll(/<button\b[^>]*\bclass="[^"]*bottom-action-button[^"]*"[^>]*>/g)].length;
+    if (actualBottomActionCount < expectedBottomActionCount) {
+      failures.push(`Missing unified bottom action buttons in ${relativePath}: expected ${expectedBottomActionCount}, found ${actualBottomActionCount}`);
+    }
+  }
 }
 
 for (const file of sourceFiles.filter((item) => extname(item) === '.wxss')) {

@@ -1,9 +1,26 @@
 <view class="page-shell beta-page" style="padding-top:{{statusBarHeight}}px;">
   <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" />
-  <view class="beta-topbar content-layer"><text class="brand-script beta-brand">NoteMyLife</text><view class="beta-heading"><view class="beta-back" bindtap="goBack"><image src="/assets/ui/icons/chevron-left.svg" /></view><text class="beta-heading-title">待办</text><view></view></view></view>
+  <view class="beta-topbar content-layer"><text class="brand-script beta-brand">Note4Seven</text><view class="beta-heading"><view class="beta-back" bindtap="goBack"><image src="/assets/ui/icons/chevron-left.svg" /></view><text class="beta-heading-title">待办</text><view></view></view></view>
   <scroll-view class="beta-scroll content-layer" scroll-y enhanced show-scrollbar="{{false}}"><view class="beta-body todo-body">
-    <view wx:if="{{loading}}" class="beta-loading">正在加载...</view><view wx:elif="{{!items.length}}" class="beta-empty beta-glass">暂时没有待处理事项</view>
-    <view wx:else class="todo-list"><view class="todo-card beta-glass" wx:for="{{items}}" wx:key="itemId" data-id="{{item.itemId}}" bindtap="markRead"><view class="todo-head"><text class="todo-type">{{item.title}}</text><text wx:if="{{item.status === 'unread'}}" class="todo-dot"></text></view><text class="todo-content">{{item.content}}</text><view wx:if="{{item.stickerPath}}" class="todo-sticker"><image class="sticker-outline-small" src="{{item.stickerPath}}" mode="aspectFit" webp /></view><text wx:if="{{item.recordDate}}" class="todo-date">{{item.recordDate}}</text><view wx:if="{{item.approval && item.approval.status === 'pending'}}" class="todo-actions"><button data-approval="{{item.approval.approvalId}}" data-action="reject" catchtap="resolveMakeup">拒绝</button><button class="approve" data-approval="{{item.approval.approvalId}}" data-action="approve" catchtap="resolveMakeup">同意</button></view><text wx:elif="{{item.approval}}" class="todo-result">{{item.approval.status === 'approved' ? '已通过' : item.approval.status === 'rejected' ? '已拒绝' : '已处理'}}</text></view></view>
+    <view wx:if="{{loading}}" class="beta-loading">正在加载...</view><view wx:elif="{{!items.length}}" class="beta-empty beta-glass">暂时没有待办</view>
+    <view wx:else class="todo-list">
+      <view class="todo-card beta-glass" wx:for="{{items}}" wx:key="itemId" data-id="{{item.itemId}}" bindtap="markRead">
+        <view class="todo-head"><text class="todo-type">{{item.title}}</text><text wx:if="{{item.status === 'unread'}}" class="todo-dot"></text></view>
+        <text class="todo-content">{{item.content}}</text>
+        <view wx:if="{{item.stickerPath}}" class="todo-sticker"><image class="sticker-outline-small" src="{{item.stickerPath}}" mode="aspectFit" webp /></view>
+        <text wx:if="{{item.recordDate}}" class="todo-date">{{item.recordDate}}</text>
+        <view wx:if="{{item.application && item.application.status === 'pending'}}" class="todo-actions">
+          <button data-application="{{item.application.applicationId}}" data-action="reject" disabled="{{item.isProcessing}}" catchtap="resolveJoin">拒绝</button>
+          <button class="approve" data-application="{{item.application.applicationId}}" data-action="approve" disabled="{{item.isProcessing}}" catchtap="resolveJoin">同意</button>
+        </view>
+        <view wx:elif="{{item.approval && item.approval.status === 'pending'}}" class="todo-actions">
+          <button data-approval="{{item.approval.approvalId}}" data-action="reject" disabled="{{item.isProcessing}}" catchtap="resolveMakeup">拒绝</button>
+          <button class="approve" data-approval="{{item.approval.approvalId}}" data-action="approve" disabled="{{item.isProcessing}}" catchtap="resolveMakeup">同意</button>
+        </view>
+        <text wx:elif="{{item.application}}" class="todo-result">{{item.application.status === 'approved' ? '已通过' : item.application.status === 'rejected' ? '已拒绝' : '已处理'}}</text>
+        <text wx:elif="{{item.approval}}" class="todo-result">{{item.approval.status === 'approved' ? '已通过' : item.approval.status === 'rejected' ? '已拒绝' : '已处理'}}</text>
+      </view>
+    </view>
   </view></scroll-view>
 </view>
 <privacy-dialog />

@@ -1,11 +1,11 @@
 <view class="page-shell beta-page" style="padding-top:{{statusBarHeight}}px;">
   <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" />
-  <view class="beta-topbar content-layer"><text class="brand-script beta-brand">NoteMyLife</text><view class="beta-heading"><view class="beta-back" bindtap="goBack"><image src="/assets/ui/icons/chevron-left.svg" /></view><text class="beta-heading-title">好友的邀请</text><view></view></view></view>
+  <view class="beta-topbar content-layer"><text class="brand-script beta-brand">Note4Seven</text><view class="beta-heading"><view class="beta-back" bindtap="goBack"><image src="/assets/ui/icons/chevron-left.svg" /></view><text class="beta-heading-title">好友的邀请</text><view></view></view></view>
   <view class="beta-body content-layer">
     <view wx:if="{{loading}}" class="beta-loading">正在查看邀请...</view>
-    <view wx:elif="{{preview}}" class="intro-card beta-glass"><text class="intro-leaf">🌿</text><text class="intro-name">{{preview.module.name}}</text><text class="intro-copy">{{preview.module.description}}</text><view class="intro-inviter"><view class="beta-avatar" style="background:{{preview.inviter.avatarColor}};"><image wx:if="{{preview.inviter.avatarUrl}}" src="{{preview.inviter.avatarUrl}}" mode="aspectFill" /><text wx:else>{{preview.inviter.avatarText}}</text></view><text>{{preview.inviter.nickname}} 邀请你一起记录</text></view><text class="intro-count">当前 {{preview.memberCount}}/{{preview.memberLimit}} 人</text></view>
+    <view wx:elif="{{preview}}" class="intro-card beta-glass"><image class="intro-illustration" src="/assets/ui/invite-paper-bag.webp" mode="aspectFit" webp /><text class="intro-name">{{preview.module.name}}</text><text class="intro-copy">{{preview.module.description}}</text><view class="intro-inviter"><view class="beta-avatar" style="background:{{preview.inviter.avatarColor}};"><image wx:if="{{preview.inviter.avatarUrl}}" src="{{preview.inviter.avatarUrl}}" mode="aspectFill" /><text wx:else>{{preview.inviter.avatarText}}</text></view><text>{{preview.inviter.nickname}} 邀请你一起记录</text></view><text class="intro-count">当前 {{preview.memberCount}}/{{preview.memberLimit}} 人</text></view>
     <view wx:if="{{resultText}}" class="result-card beta-glass">{{resultText}}</view>
   </view>
-  <view class="beta-fixed-action content-layer"><button class="beta-primary" disabled="{{!preview || !preview.valid || submitting || resultText}}" loading="{{submitting}}" bindtap="apply">{{preview && !preview.valid ? '邀请已失效' : '申请加入'}}</button></view>
+  <view class="beta-fixed-action bottom-action-bar content-layer"><button class="beta-primary bottom-action-button" disabled="{{!preview || !preview.valid || submitting || resultText}}" loading="{{submitting}}" bindtap="apply">{{preview && !preview.valid ? '邀请已失效' : '申请加入'}}</button></view>
 </view>
 <privacy-dialog />

@@ -6,14 +6,20 @@ import {
   deleteModuleToRecycle,
   deleteRecord,
   getCalendar,
+  getDateRecords,
   getHomeModules,
   getMemoryView,
   getModule,
   getModuleGallery,
+  getModuleInbox,
   getModuleReminder,
+  getNotifications,
   getPrivacyView,
   getRecycleBin,
   getRecordReactions,
+  markModuleInboxRead,
+  markNotificationRead,
+  removeModuleMember,
   removeModuleForCurrentUser,
   resolveJoinApplication,
   resolveMakeupApproval,
@@ -53,6 +59,11 @@ describe('Alpha service contract', () => {
   it('separates pinned modules and limits sorted previews to four', async () => {
     const home = await getHomeModules();
     expect(home.pinned.map((item) => item.moduleId)).toContain('module_coffee');
+    const dinner = [...home.pinned, ...home.normal].find((item) => item.moduleId === 'module_dinner');
+    expect(dinner?.todayPreviewItems.map((item) => item.recordId)).toEqual([
+      `module_dinner_1_${shanghaiDate()}`,
+      `module_dinner_3_${shanghaiDate()}`,
+    ]);
     const previews = [...home.pinned, ...home.normal].flatMap((item) => item.todayPreviewItems);
     expect(previews.every((item, index, list) => index === 0 || item.displayOrder >= 0 || list.length === 0)).toBe(true);
     expect([...home.pinned, ...home.normal].every((item) => item.todayPreviewItems.length <= 4)).toBe(true);
@@ -176,14 +187,28 @@ describe('Beta relationship contract', () => {
     storage.set('notemylife.alpha.database.v1', legacy);
 
     const migrated = readDatabase();
-    expect(migrated.schemaVersion).toBe(5);
+    expect(migrated.schemaVersion).toBe(8);
     expect(migrated.betaDemoSeeded).toBe(true);
+    expect(migrated.templates.map((template) => template.name)).toEqual([
+      '饮品check！',
+      '美食check！',
+      '健身check！',
+      '自律check！',
+    ]);
+    expect(migrated.templates.map((template) => template.description)).toEqual([
+      '今天喝啥了？',
+      '今天吃啥了？',
+      '肌肉生长中',
+      '所有目标完成完成完成！',
+    ]);
     expect(migrated.notifications.some((item) => item.type === 'join_application')).toBe(true);
     expect(migrated.moduleInboxItems.some((item) => item.type === 'makeup_approval')).toBe(true);
     expect(readDatabase().notifications).toHaveLength(migrated.notifications.length);
   });
 
   it('completes invite application and creator approval with a new member instance', async () => {
+    const initialInbox = await getModuleInbox('module_weekend');
+    const initialUnreadCount = initialInbox.filter((item) => item.status === 'unread').length;
     const invite = await createModuleInvite('module_weekend');
     updateDatabase((database) => {
       database.currentUser = { userId: 'user_new', nickname: '禾苗', avatarText: '苗', avatarColor: '#d8e2d4' };
@@ -195,13 +220,61 @@ describe('Beta relationship contract', () => {
     updateDatabase((database) => {
       database.currentUser = { userId: 'user_me', nickname: '小满', avatarText: '🐰', avatarColor: '#e65f45' };
     });
+    const inboxItem = (await getModuleInbox('module_weekend'))
+      .find((item) => item.targetId === application.applicationId);
+    expect(inboxItem).toMatchObject({
+      type: 'join_application',
+      status: 'unread',
+      application: { status: 'pending' },
+    });
+    const homeBeforeRead = await getHomeModules();
+    expect([...homeBeforeRead.pinned, ...homeBeforeRead.normal]
+      .find((item) => item.moduleId === 'module_weekend')?.unreadInboxCount).toBe(initialUnreadCount + 1);
+
+    await markModuleInboxRead(inboxItem!.itemId, inboxItem!.notificationId, 'module_weekend');
+    expect((await getModuleInbox('module_weekend'))
+      .find((item) => item.targetId === application.applicationId)?.status).toBe('unread');
+    expect((await getNotifications())
+      .find((notification) => notification.targetId === application.applicationId)?.isRead).toBe(false);
+    const homeAfterRead = await getHomeModules();
+    expect([...homeAfterRead.pinned, ...homeAfterRead.normal]
+      .find((item) => item.moduleId === 'module_weekend')?.unreadInboxCount).toBe(initialUnreadCount + 1);
+
+    const unreadBeforeResolution = (await getNotifications()).filter((notification) => !notification.isRead).length;
     const resolved = await resolveJoinApplication(application.applicationId, 'approve');
     expect(resolved.status).toBe('approved');
     expect(resolved.resultMemberInstanceId).toBeTruthy();
+    const notifications = await getNotifications();
+    expect(notifications.find((notification) => notification.targetId === application.applicationId)).toMatchObject({
+      actionStatus: 'resolved',
+      isRead: true,
+    });
+    expect(notifications.filter((notification) => !notification.isRead)).toHaveLength(unreadBeforeResolution - 1);
+    expect((await getModuleInbox('module_weekend'))
+      .find((item) => item.targetId === application.applicationId)).toMatchObject({
+        title: '成员已加入',
+        status: 'read',
+        application: { status: 'approved' },
+      });
     const module = await getModule('module_weekend');
     expect(module.members).toHaveLength(3);
     expect(module.members.find((member) => member.userId === 'user_new')?.joinSequence).toBe(3);
     await expect(resolveJoinApplication(application.applicationId, 'approve')).rejects.toThrow('JOIN_APPLICATION_ALREADY_RESOLVED');
+
+    updateDatabase((database) => {
+      database.currentUser = { userId: 'user_an', nickname: '阿南', avatarText: '🐶', avatarColor: '#ded9cf' };
+    });
+    const memberJoinedItem = (await getModuleInbox('module_weekend'))
+      .find((item) => item.type === 'member_change' && item.targetId === resolved.resultMemberInstanceId);
+    const memberJoinedNotification = (await getNotifications())
+      .find((item) => item.type === 'member_change' && item.targetId === resolved.resultMemberInstanceId);
+    expect(memberJoinedItem).toMatchObject({ title: '成员已加入', status: 'unread' });
+    expect(memberJoinedNotification?.isRead).toBe(false);
+    await markModuleInboxRead(memberJoinedItem!.itemId, undefined, 'module_weekend');
+    expect((await getModuleInbox('module_weekend'))
+      .find((item) => item.itemId === memberJoinedItem!.itemId)?.status).toBe('read');
+    expect((await getNotifications())
+      .find((item) => item.notificationId === memberJoinedNotification!.notificationId)?.isRead).toBe(true);
   });
 
   it('enforces one reaction per member and blocks reacting to your own record', async () => {
@@ -234,10 +307,50 @@ describe('Beta relationship contract', () => {
     updateDatabase((database) => {
       database.currentUser = { userId: 'user_lin', nickname: '阿树', avatarText: '🐻', avatarColor: '#e9dfcf' };
     });
+    const pendingItem = (await getModuleInbox('module_dinner'))
+      .find((item) => item.targetId === created.approval!.approvalId);
+    expect(pendingItem).toMatchObject({ status: 'unread', approval: { status: 'pending' } });
+    await markModuleInboxRead(pendingItem!.itemId, undefined, 'module_dinner');
+    expect((await getModuleInbox('module_dinner'))
+      .find((item) => item.itemId === pendingItem!.itemId)?.status).toBe('unread');
+
     const approval = await resolveMakeupApproval(created.approval!.approvalId, 'approve');
     expect(approval.status).toBe('approved');
     expect(readDatabase().records.find((record) => record.recordId === created.record.recordId)?.status).toBe('locked');
+    expect((await getModuleInbox('module_dinner'))
+      .find((item) => item.itemId === pendingItem!.itemId)).toMatchObject({
+        type: 'makeup_result',
+        status: 'read',
+        approval: { status: 'approved' },
+      });
     await expect(resolveMakeupApproval(created.approval!.approvalId, 'reject')).rejects.toThrow('APPROVAL_ALREADY_RESOLVED');
+
+    updateDatabase((database) => {
+      database.currentUser = { userId: 'user_qiu', nickname: '橙子', avatarText: '🦊', avatarColor: '#f2dfcf' };
+    });
+    const synchronizedItem = (await getModuleInbox('module_dinner'))
+      .find((item) => item.targetId === created.approval!.approvalId);
+    expect(synchronizedItem).toMatchObject({
+      type: 'makeup_result',
+      status: 'unread',
+      approval: { status: 'approved' },
+    });
+    await markModuleInboxRead(synchronizedItem!.itemId, undefined, 'module_dinner');
+    expect((await getModuleInbox('module_dinner'))
+      .find((item) => item.itemId === synchronizedItem!.itemId)?.status).toBe('read');
+
+    updateDatabase((database) => {
+      database.currentUser = { userId: 'user_me', nickname: '小满', avatarText: '🐱', avatarColor: '#e65f45' };
+    });
+    const applicantResult = (await getModuleInbox('module_dinner'))
+      .find((item) => item.type === 'makeup_result' && item.targetId === created.record.recordId);
+    const applicantNotification = (await getNotifications())
+      .find((item) => item.type === 'makeup_result' && item.targetId === created.record.recordId);
+    expect(applicantResult?.status).toBe('unread');
+    expect(applicantNotification?.isRead).toBe(false);
+    await markModuleInboxRead(applicantResult!.itemId, undefined, 'module_dinner');
+    expect((await getNotifications())
+      .find((item) => item.notificationId === applicantNotification!.notificationId)?.isRead).toBe(true);
   });
 
   it('applies solo makeup directly and locks the historical record', async () => {
@@ -260,6 +373,21 @@ describe('Beta relationship contract', () => {
 
   it('revokes calendar and reaction access immediately after a participant exits', async () => {
     const today = shanghaiDate();
+    const todayRecord = await saveRecord({
+      moduleId: 'module_dinner',
+      recordDate: today,
+      originalPath: STICKER_PATHS[1],
+      stickerPath: STICKER_PATHS[1],
+      remark: '退出前的当天记录',
+      clientRequestId: 'record_before_exit',
+    });
+    const historicalRecordCount = readDatabase().records.filter((record) =>
+      record.memberInstanceId === todayRecord.memberInstanceId && record.recordDate !== today).length;
+    const activeMemberTodayRecordIds = readDatabase().records
+      .filter((record) => record.moduleId === 'module_dinner'
+        && record.recordDate === today
+        && record.memberInstanceId !== todayRecord.memberInstanceId)
+      .map((record) => record.recordId);
     await removeModuleForCurrentUser('module_dinner');
     await expect(getCalendar('module_dinner', today.slice(0, 7))).rejects.toThrow('MODULE_ACCESS_DENIED');
     await expect(getRecordReactions(`module_dinner_1_${today}`)).rejects.toThrow('MODULE_ACCESS_DENIED');
@@ -268,7 +396,57 @@ describe('Beta relationship contract', () => {
       .find((item) => item.userId === 'user_me');
     expect(member?.active).toBe(false);
     expect(member?.leaveReason).toBe('self_exit');
+    expect(database.records.some((record) => record.recordId === todayRecord.recordId)).toBe(false);
+    expect(activeMemberTodayRecordIds.every((recordId) =>
+      database.records.some((record) => record.recordId === recordId))).toBe(true);
+    expect(database.records.filter((record) =>
+      record.memberInstanceId === todayRecord.memberInstanceId && record.recordDate !== today)).toHaveLength(historicalRecordCount);
     expect(database.reactions.find((reaction) => reaction.reactorUserId === 'user_me')?.reactorNameSnapshot).toBe('已退出成员');
+    updateDatabase((current) => {
+      current.currentUser = { userId: 'user_lin', nickname: '阿树', avatarText: '🐻', avatarColor: '#e9dfcf' };
+    });
+    const exitInboxItem = (await getModuleInbox('module_dinner'))
+      .find((item) => item.type === 'member_change' && item.targetId === todayRecord.memberInstanceId);
+    const exitNotification = (await getNotifications())
+      .find((item) => item.type === 'member_change' && item.targetId === todayRecord.memberInstanceId);
+    expect(exitInboxItem?.status).toBe('unread');
+    expect(exitNotification?.isRead).toBe(false);
+    const homeBeforeRead = await getHomeModules();
+    const unreadBeforeRead = [...homeBeforeRead.pinned, ...homeBeforeRead.normal]
+      .find((item) => item.moduleId === 'module_dinner')?.unreadInboxCount ?? 0;
+    expect(unreadBeforeRead).toBeGreaterThan(0);
+
+    await markNotificationRead(exitNotification!.notificationId);
+    expect((await getModuleInbox('module_dinner'))
+      .find((item) => item.itemId === exitInboxItem!.itemId)?.status).toBe('read');
+    const homeAfterRead = await getHomeModules();
+    expect([...homeAfterRead.pinned, ...homeAfterRead.normal]
+      .find((item) => item.moduleId === 'module_dinner')?.unreadInboxCount).toBe(unreadBeforeRead - 1);
+    expect((await getDateRecords('module_dinner', today)).some((record) =>
+      record.memberInstanceId === todayRecord.memberInstanceId)).toBe(false);
+  });
+
+  it('notifies remaining members when the creator removes a participant', async () => {
+    const module = await getModule('module_weekend');
+    const target = module.members.find((member) => member.userId === 'user_an');
+    expect(target).toBeDefined();
+
+    await removeModuleMember(module.moduleId, target!.memberInstanceId);
+
+    const inboxItem = (await getModuleInbox(module.moduleId))
+      .find((item) => item.type === 'member_change' && item.targetId === target!.memberInstanceId);
+    const notification = (await getNotifications())
+      .find((item) => item.type === 'member_change' && item.targetId === target!.memberInstanceId);
+    expect(inboxItem).toMatchObject({
+      title: '成员退出',
+      content: `「${target!.nickname}」已退出「${module.name}」`,
+      status: 'unread',
+    });
+    expect(notification).toMatchObject({
+      title: '成员退出',
+      content: `「${target!.nickname}」已退出「${module.name}」`,
+      isRead: false,
+    });
   });
 });
 
@@ -307,8 +485,7 @@ describe('RC content and lifecycle contract', () => {
 
   it('moves creator modules into recycle, blocks writes, and restores without reviving old invites', async () => {
     const invite = await createModuleInvite('module_weekend');
-    await expect(deleteModuleToRecycle('module_weekend', '错误名称')).rejects.toThrow('MODULE_NAME_MISMATCH');
-    await deleteModuleToRecycle('module_weekend', '周末去哪里');
+    await deleteModuleToRecycle('module_weekend');
     await expect(getModule('module_weekend')).rejects.toThrow('MODULE_PENDING_DELETE');
     await expect(saveRecord({
       moduleId: 'module_weekend', recordDate: shanghaiDate(), originalPath: STICKER_PATHS[0],
@@ -323,7 +500,7 @@ describe('RC content and lifecycle contract', () => {
   });
 
   it('permanently removes expired recycled module content during maintenance', async () => {
-    await deleteModuleToRecycle('module_weekend', '周末去哪里');
+    await deleteModuleToRecycle('module_weekend');
     updateDatabase((database) => {
       const module = database.modules.find((item) => item.moduleId === 'module_weekend');
       if (module) module.recycleExpireAt = '2020-01-01T00:00:00+08:00';

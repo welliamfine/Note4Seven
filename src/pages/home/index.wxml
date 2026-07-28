@@ -1,10 +1,10 @@
-<swiper class="primary-swiper" current="{{primaryTabIndex}}" duration="260" easing-function="easeInOutCubic" skip-hidden-item-layout="{{true}}" disable-touch="{{primaryTabIndex === 0 || cardGestureActive || createOpen}}" bindchange="onPrimarySwiperChange" bindanimationfinish="onPrimarySwiperAnimationFinish">
+<swiper class="primary-swiper" current="{{primaryTabIndex}}" duration="260" easing-function="easeInOutCubic" skip-hidden-item-layout="{{true}}" disable-touch="{{primaryTabIndex === 0 || cardGestureActive || homeMotionActive || createOpen}}" bindchange="onPrimarySwiperChange" bindanimationfinish="onPrimarySwiperAnimationFinish">
   <swiper-item class="primary-swiper-item">
-<view class="page-shell home">
+<view class="page-shell home {{managing ? 'home-managing' : ''}}">
   <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
   <view class="home-top" style="padding-top: {{statusBarHeight}}px;">
-    <view class="home-brand"><text class="brand-script">NoteMyLife</text><text>记录我的一辈子</text></view>
-    <view class="manage-pill" bindtap="toggleManage" hover-class="control-pressed" hover-stay-time="80" role="button">{{managing ? '完成' : '管理'}}</view>
+    <view class="home-brand"><text class="brand-script">Note4Seven</text><text>七日记</text></view>
+    <view wx:if="{{!loading && pinnedModules.length + normalModules.length && !homeMotionActive}}" class="manage-pill" bindtap="toggleManage" hover-class="control-pressed" hover-stay-time="80" role="button">{{managing ? '完成' : '管理'}}</view>
   </view>
 
   <scroll-view class="home-module-scroll" scroll-y enhanced show-scrollbar="{{false}}">
@@ -14,67 +14,62 @@
   </view>
 
   <view wx:elif="{{pinnedModules.length + normalModules.length === 0}}" class="empty-home">
-    <view class="empty-sticker"><view class="sticker-pop-wrapper {{homeStickerPhase}}"><image src="/assets/stickers/group-3.png" mode="aspectFit" /></view></view>
-    <text class="empty-title">从今天开始，留下一点生活</text>
-    <text class="empty-copy">一张照片，一个只属于你们的日历。</text>
+    <view class="empty-sticker"><view class="sticker-pop-wrapper {{homeStickerPhase}}"><image class="sticker-outline-medium" src="/assets/ui/empty-journal.webp" mode="aspectFit" webp /></view></view>
+    <text class="empty-title">开始记录吧~</text>
     <button class="primary-button empty-button" data-source="empty_primary" bindtap="openCreate">创建第一个记录</button>
   </view>
 
-  <view wx:else class="module-groups" bindtouchstart="onHomeGapTouchStart" bindtouchend="onHomeGapTouchEnd">
+  <view wx:else class="module-groups {{pinLayoutPhase ? 'pin-layout-active' : ''}} {{homeMotionActive ? 'pin-motion-active' : ''}}" bindtouchstart="onHomeGapTouchStart" bindtouchend="onHomeGapTouchEnd">
     <view wx:if="{{pinnedModules.length}}" class="module-group">
       <view class="group-heading">
         <text>置顶模块</text>
-        <view class="group-toggle" bindtap="togglePinnedGroup" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="展开或收起置顶模块"><image src="/assets/ui/icons/chevron-down.svg" class="group-chevron {{pinnedExpanded ? 'chevron-open' : ''}}" /></view>
+        <view wx:if="{{!managing}}" class="group-toggle" bindtap="togglePinnedGroup" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="展开或收起置顶模块"><image src="/assets/ui/icons/chevron-down.svg" class="group-chevron {{pinnedExpanded ? 'chevron-open' : ''}}" /></view>
       </view>
       <view class="group-list {{pinnedExpanded ? '' : 'group-list-collapsed'}} {{pinnedExpanding ? 'group-list-opening' : ''}} {{pinnedCollapsing ? 'group-list-closing' : ''}}" style="height: {{pinnedExpanded ? pinnedModules.length * 254 : 266}}rpx; --group-motion-duration: {{homeGroupMotionDuration}}ms; --group-opening-duration: {{homeGroupOpeningDuration}}ms; --group-card-opening-duration: {{homeGroupCardOpeningDuration}}ms;">
-        <view class="module-card collapse-order-{{index < 3 ? index : 'overflow'}} {{managing || revealedModuleId === item.moduleId ? 'action-open' : ''}}" style="--collapse-y: {{index === 0 ? 0 : (index === 1 ? -238 : 30 - index * 254)}}rpx; --expand-delay: {{(index < homeGroupOpeningMaxStaggerSteps ? index : homeGroupOpeningMaxStaggerSteps) * homeGroupOpeningStaggerStep}}ms;" wx:for="{{pinnedModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtouchstart="onCardTouchStart" bindtouchend="onCardTouchEnd" bindtouchcancel="onCardTouchCancel">
-          <view class="card-actions">
-            <button class="module-action pin-action" data-id="{{item.moduleId}}" data-pinned="true" catchtap="togglePin">取消置顶</button>
-            <button class="module-action delete-action" data-id="{{item.moduleId}}" catchtap="removeModule">删除</button>
-          </view>
+        <view class="module-card collapse-order-{{index < 3 ? index : 'overflow'}} {{item.selected ? 'module-selected' : ''}} {{pinPopoverModuleId === item.moduleId ? 'pin-popover-open' : ''}} {{item.motionPhase ? 'home-card-' + item.motionPhase : ''}} {{pinLayoutPhase && item.pinShiftActive ? 'pin-layout-' + pinLayoutPhase : ''}}" style="--collapse-y: {{index === 0 ? 0 : (index === 1 ? -238 : 30 - index * 254)}}rpx; --expand-delay: {{(index < homeGroupOpeningMaxStaggerSteps ? index : homeGroupOpeningMaxStaggerSteps) * homeGroupOpeningStaggerStep}}ms; --pin-leave-duration: {{pinLeaveDuration}}ms; --pin-layout-duration: {{pinLayoutDuration}}ms; --pin-enter-duration: {{pinEnterDuration}}ms; --pin-layout-y: {{item.pinShiftOffsetRpx}}rpx;" wx:for="{{pinnedModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" data-pinned="true" bindlongpress="onModuleLongPress" bindtouchstart="onCardTouchStart" bindtouchend="onCardTouchEnd" bindtouchcancel="onCardTouchCancel">
+          <view wx:if="{{managing}}" class="module-select {{item.selected ? 'module-select-checked' : ''}}" data-id="{{item.moduleId}}" catchtap="onModuleSelectionTap" role="checkbox" aria-checked="{{item.selected}}"><text wx:if="{{item.selected}}">✓</text></view>
           <view class="module-card-content" data-id="{{item.moduleId}}" bindtap="openModule">
             <view class="card-copy">
-              <text class="module-name">{{item.name}}</text>
+              <view class="module-name-row"><text class="module-name">{{item.name}}</text><text wx:if="{{item.unreadInboxCount > 0}}" class="module-unread-dot"></text></view>
               <view class="avatar-stack">
                 <view class="mini-avatar" wx:for="{{item.members}}" wx:for-item="member" wx:key="memberInstanceId" style="background: {{member.avatarUrl ? 'transparent' : member.avatarColor}}; margin-left: {{index ? '-9rpx' : '0'}};"><image wx:if="{{member.avatarUrl}}" src="{{member.avatarUrl}}" mode="aspectFill" /><text wx:else>{{member.avatarText}}</text></view>
               </view>
             </view>
             <view class="sticker-stack">
               <view class="stack-sticker-position" wx:for="{{item.todayPreviewItems}}" wx:for-item="sticker" wx:key="recordId" style="right: {{sticker.displayOrder * 68}}rpx; z-index: {{4 - sticker.displayOrder}};">
-                <view class="sticker-pop-wrapper {{homeStickerPhase}}"><image class="stack-sticker-content sticker-outline-medium sticker-{{sticker.displayOrder}}" src="{{sticker.stickerPath}}" mode="aspectFit" webp /></view>
+                <view class="sticker-pop-wrapper {{sticker.motionPhase || homeStickerPhase}}"><image class="stack-sticker-content sticker-outline-medium sticker-{{sticker.displayOrder}}" src="{{sticker.stickerPath}}" mode="aspectFit" webp /></view>
               </view>
-              <text wx:if="{{!item.todayPreviewItems.length}}" class="quiet-label">今天还静悄悄</text>
+              <text wx:if="{{!item.todayPreviewItems.length}}" class="quiet-label">怎么没人记录？</text>
             </view>
           </view>
+          <view wx:if="{{pinPopoverModuleId === item.moduleId}}" class="pin-popover" data-id="{{item.moduleId}}" catchtap="togglePinFromBubble">取消置顶</view>
         </view>
       </view>
     </view>
 
-    <view wx:if="{{normalModules.length}}" class="module-group normal-group">
+    <view wx:if="{{normalModules.length}}" class="module-group normal-group {{pinLayoutPhase ? 'pin-group-' + pinLayoutPhase : ''}}" style="--pin-group-y: {{pinNormalGroupOffsetRpx}}rpx; --pin-layout-duration: {{pinLayoutDuration}}ms;">
       <view class="group-heading">
         <text>普通模块</text>
-        <view class="group-toggle" bindtap="toggleNormalGroup" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="展开或收起普通模块"><image src="/assets/ui/icons/chevron-down.svg" class="group-chevron {{normalExpanded ? 'chevron-open' : ''}}" /></view>
+        <view wx:if="{{!managing}}" class="group-toggle" bindtap="toggleNormalGroup" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="展开或收起普通模块"><image src="/assets/ui/icons/chevron-down.svg" class="group-chevron {{normalExpanded ? 'chevron-open' : ''}}" /></view>
       </view>
       <view class="group-list {{normalExpanded ? '' : 'group-list-collapsed'}} {{normalExpanding ? 'group-list-opening' : ''}} {{normalCollapsing ? 'group-list-closing' : ''}}" style="height: {{normalExpanded ? normalModules.length * 254 : 266}}rpx; --group-motion-duration: {{homeGroupMotionDuration}}ms; --group-opening-duration: {{homeGroupOpeningDuration}}ms; --group-card-opening-duration: {{homeGroupCardOpeningDuration}}ms;">
-        <view class="module-card collapse-order-{{index < 3 ? index : 'overflow'}} {{managing || revealedModuleId === item.moduleId ? 'action-open' : ''}}" style="--collapse-y: {{index === 0 ? 0 : (index === 1 ? -238 : 30 - index * 254)}}rpx; --expand-delay: {{(index < homeGroupOpeningMaxStaggerSteps ? index : homeGroupOpeningMaxStaggerSteps) * homeGroupOpeningStaggerStep}}ms;" wx:for="{{normalModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtouchstart="onCardTouchStart" bindtouchend="onCardTouchEnd" bindtouchcancel="onCardTouchCancel">
-          <view class="card-actions">
-            <button class="module-action pin-action" data-id="{{item.moduleId}}" data-pinned="false" catchtap="togglePin">置顶</button>
-            <button class="module-action delete-action" data-id="{{item.moduleId}}" catchtap="removeModule">删除</button>
-          </view>
+        <view class="module-card collapse-order-{{index < 3 ? index : 'overflow'}} {{item.selected ? 'module-selected' : ''}} {{pinPopoverModuleId === item.moduleId ? 'pin-popover-open' : ''}} {{item.motionPhase ? 'home-card-' + item.motionPhase : ''}} {{pinLayoutPhase && item.pinShiftActive ? 'pin-layout-' + pinLayoutPhase : ''}}" style="--collapse-y: {{index === 0 ? 0 : (index === 1 ? -238 : 30 - index * 254)}}rpx; --expand-delay: {{(index < homeGroupOpeningMaxStaggerSteps ? index : homeGroupOpeningMaxStaggerSteps) * homeGroupOpeningStaggerStep}}ms; --pin-leave-duration: {{pinLeaveDuration}}ms; --pin-layout-duration: {{pinLayoutDuration}}ms; --pin-enter-duration: {{pinEnterDuration}}ms; --pin-layout-y: {{item.pinShiftOffsetRpx}}rpx;" wx:for="{{normalModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" data-pinned="false" bindlongpress="onModuleLongPress" bindtouchstart="onCardTouchStart" bindtouchend="onCardTouchEnd" bindtouchcancel="onCardTouchCancel">
+          <view wx:if="{{managing}}" class="module-select {{item.selected ? 'module-select-checked' : ''}}" data-id="{{item.moduleId}}" catchtap="onModuleSelectionTap" role="checkbox" aria-checked="{{item.selected}}"><text wx:if="{{item.selected}}">✓</text></view>
           <view class="module-card-content" data-id="{{item.moduleId}}" bindtap="openModule">
             <view class="card-copy">
-              <text class="module-name">{{item.name}}</text>
+              <view class="module-name-row"><text class="module-name">{{item.name}}</text><text wx:if="{{item.unreadInboxCount > 0}}" class="module-unread-dot"></text></view>
               <view class="avatar-stack">
                 <view class="mini-avatar" wx:for="{{item.members}}" wx:for-item="member" wx:key="memberInstanceId" style="background: {{member.avatarUrl ? 'transparent' : member.avatarColor}}; margin-left: {{index ? '-9rpx' : '0'}};"><image wx:if="{{member.avatarUrl}}" src="{{member.avatarUrl}}" mode="aspectFill" /><text wx:else>{{member.avatarText}}</text></view>
               </view>
             </view>
             <view class="sticker-stack">
               <view class="stack-sticker-position" wx:for="{{item.todayPreviewItems}}" wx:for-item="sticker" wx:key="recordId" style="right: {{sticker.displayOrder * 68}}rpx; z-index: {{4 - sticker.displayOrder}};">
-                <view class="sticker-pop-wrapper {{homeStickerPhase}}"><image class="stack-sticker-content sticker-outline-medium sticker-{{sticker.displayOrder}}" src="{{sticker.stickerPath}}" mode="aspectFit" webp /></view>
+                <view class="sticker-pop-wrapper {{sticker.motionPhase || homeStickerPhase}}"><image class="stack-sticker-content sticker-outline-medium sticker-{{sticker.displayOrder}}" src="{{sticker.stickerPath}}" mode="aspectFit" webp /></view>
               </view>
-              <text wx:if="{{!item.todayPreviewItems.length}}" class="quiet-label">今天还静悄悄</text>
+              <text wx:if="{{!item.todayPreviewItems.length}}" class="quiet-label">怎么没人记录？</text>
             </view>
           </view>
+          <view wx:if="{{pinPopoverModuleId === item.moduleId}}" class="pin-popover" data-id="{{item.moduleId}}" catchtap="togglePinFromBubble">置顶</view>
         </view>
       </view>
     </view>
@@ -83,7 +78,11 @@
   </scroll-view>
 </view>
 
-  <view wx:if="{{!loading && pinnedModules.length + normalModules.length > 0 && !managing}}" class="floating-add" data-source="floating" bindtap="openCreate" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="创建记录模块"><image src="/assets/ui/icons/plus.svg" /></view>
+  <view wx:if="{{!loading && pinnedModules.length + normalModules.length > 0 && !managing && !homeMotionActive}}" class="floating-add" data-source="floating" bindtap="openCreate" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="创建记录模块"><image src="/assets/ui/icons/plus.svg" /></view>
+
+  <view wx:if="{{managing && !homeMotionActive}}" class="manage-toolbar">
+    <button class="manage-delete" disabled="{{!selectedModuleIds.length || removingModules}}" loading="{{removingModules}}" bindtap="removeSelectedModules" aria-label="删除已选择模块"><image src="/assets/ui/icons/trash-2.svg" />删除</button>
+  </view>
 
   <view wx:if="{{createOpen}}" class="overlay sheet-motion-overlay {{createClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeCreate">
     <view class="create-sheet safe-bottom sheet-motion-panel {{createClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation">
@@ -98,7 +97,7 @@
         </view>
         <text wx:if="{{createError}}" class="form-error">{{createError}}</text>
       </scroll-view>
-      <button class="primary-button create-submit" disabled="{{createSubmitting}}" loading="{{createSubmitting}}" bindtap="submitCreate">完成创建</button>
+      <button class="primary-button bottom-action-button create-submit" disabled="{{createSubmitting}}" loading="{{createSubmitting}}" bindtap="submitCreate">完成创建</button>
     </view>
   </view>
   </swiper-item>
@@ -123,7 +122,7 @@
           <view class="record-card">
             <view class="record-heading">
               <view bindtap="openMemorySelection"><text class="record-word">RECORD</text><text class="record-month">{{memorySelectedModuleName || '本月记录'}} · {{memoryMonthLabel}}</text></view>
-              <button bindtap="changeMemoryGroup">换一组</button>
+              <button bindtap="changeMemoryGroup" disabled="{{memoryChangingGroup}}" loading="{{memoryChangingGroup}}">{{memoryChangingGroup ? '' : '换一组'}}</button>
             </view>
             <view class="memory-grid">
               <view class="memory-cell" wx:for="{{memoryStickers}}" wx:key="id"><view class="sticker-pop-wrapper {{memoryStickerPhase}}" style="animation-delay: {{memoryStickerPhase === 'sticker-entering' ? item.popDelay : 0}}ms;"><image class="sticker-outline-medium" src="{{item.path}}" mode="aspectFit" webp /></view></view>
@@ -145,7 +144,6 @@
         <view class="discover-empty content-layer">
           <view class="discover-icon"><image src="/assets/ui/icons/compass.svg" /></view>
           <text class="discover-title">更多记录灵感即将上线</text>
-          <text class="discover-copy">想晒晒自己的打卡记录？想加入其他人的模板？<br />下一版本或许....</text>
         </view>
       </view>
     </scroll-view>
@@ -172,5 +170,5 @@
   </swiper-item>
 </swiper>
 <view wx:if="{{memorySelectionOpen}}" class="beta-overlay memory-select-overlay sheet-motion-overlay {{memorySelectionClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeMemorySelection"><view class="beta-sheet memory-select-sheet sheet-motion-panel {{memorySelectionClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">选择模块和月份</text><view class="memory-month-selector"><view bindtap="previousMemoryMonth"><image src="/assets/ui/icons/chevron-left.svg" /></view><text>{{memoryMonthLabel}}</text><view bindtap="nextMemoryMonth"><image src="/assets/ui/icons/chevron-right.svg" /></view></view><view class="memory-module-options"><button class="{{memorySelectedModuleId === item.moduleId ? 'selected' : ''}}" wx:for="{{memoryModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtap="selectMemoryModule">{{item.name}}</button></view></view></view>
-<view wx:if="{{profileEditOpen}}" class="beta-overlay profile-edit-overlay sheet-motion-overlay {{profileEditClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeProfileEditor"><view class="beta-sheet profile-edit-sheet sheet-motion-panel {{profileEditClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">编辑个人资料</text><button class="profile-avatar-picker" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar"><view class="profile-avatar profile-draft-avatar" style="background: {{profileUser.avatarColor}};"><image wx:if="{{profileDraftAvatarUrl}}" src="{{profileDraftAvatarUrl}}" mode="aspectFill" /><text wx:else>{{profileUser.avatarText}}</text></view><text>更换头像</text></button><input class="beta-input profile-nickname-input" type="nickname" maxlength="20" value="{{profileDraftNickname}}" bindinput="onProfileNicknameInput" placeholder="请输入昵称" placeholder-class="text-placeholder" /><button class="beta-primary profile-save-button" loading="{{profileSaving}}" bindtap="saveProfile">保存资料</button></view></view>
+<view wx:if="{{profileEditOpen}}" class="beta-overlay profile-edit-overlay sheet-motion-overlay {{profileEditClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeProfileEditor"><view class="beta-sheet profile-edit-sheet sheet-motion-panel {{profileEditClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">编辑个人资料</text><button class="profile-avatar-picker" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar"><view class="profile-avatar profile-draft-avatar" style="background: {{profileUser.avatarColor}};"><image wx:if="{{profileDraftAvatarUrl}}" src="{{profileDraftAvatarUrl}}" mode="aspectFill" /><text wx:else>{{profileUser.avatarText}}</text></view><text>更换头像</text></button><input class="beta-input profile-nickname-input" type="nickname" maxlength="20" value="{{profileDraftNickname}}" bindinput="onProfileNicknameInput" placeholder="请输入昵称" placeholder-class="text-placeholder" /><button class="beta-primary bottom-action-button profile-save-button" loading="{{profileSaving}}" bindtap="saveProfile">保存资料</button></view></view>
 <privacy-dialog />

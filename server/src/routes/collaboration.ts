@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { z } from 'zod';
 import { AppError } from '../lib/errors';
 import { asyncRoute, ok, parseBody } from '../lib/http';
@@ -28,6 +28,7 @@ interface InviteRow extends RowDataPacket {
   module_name: string;
   module_description: string | null;
   module_status: string;
+  creator_user_id: string;
   active_member_count: number;
   member_limit: number;
   inviter_name: string;
@@ -166,8 +167,15 @@ export function collaborationRoutes(pool: Pool, storage: StorageService): Router
             dedupe_key)
          VALUES (?, 'join_application_created', '新的加入申请', ?, ?, 'join_application', ?,
                  'approve_join', 'actionable', ?, ?)`,
-        [invite.created_by_user_id, `「${user.nickname}」申请加入 ${invite.module_name}`, invite.module_id,
+        [invite.creator_user_id, `「${user.nickname}」申请加入 ${invite.module_name}`, invite.module_id,
           applicationId, expireAt, `join_application:${applicationId}`],
+      );
+      await connection.execute(
+        `INSERT INTO module_inbox_item
+           (module_id, recipient_user_id, type, title, content, target_type, target_id, status, dedupe_key, expire_at)
+         VALUES (?, ?, 'join_application', '新的加入申请', ?, 'join_application', ?, 'unread', ?, ?)`,
+        [invite.module_id, invite.creator_user_id, `「${user.nickname}」申请加入 ${invite.module_name}`,
+          applicationId, `join_application:${applicationId}`, expireAt],
       );
       return {
         applicationId: publicId('ja', applicationId),
@@ -216,7 +224,12 @@ export function collaborationRoutes(pool: Pool, storage: StorageService): Router
     const moduleId = dbId(request.params.moduleId, 'm');
     const access = await requireMember(pool, moduleId, user.userId, { allowPendingDelete: true });
     const [members] = await pool.execute<MemberRow[]>(
-      `SELECT * FROM module_member WHERE module_id = ? AND status = 'active' ORDER BY join_sequence`,
+      `SELECT mm.member_instance_id, mm.module_id, mm.user_id, mm.role, mm.status, mm.join_sequence,
+              u.nickname AS nickname_snapshot, u.avatar_file_key AS avatar_file_key_snapshot, mm.joined_at
+         FROM module_member mm
+         JOIN user_account u ON u.user_id = mm.user_id
+        WHERE mm.module_id = ? AND mm.status = 'active'
+        ORDER BY mm.join_sequence`,
       [moduleId],
     );
     const [todayRecords] = await pool.execute<RowDataPacket[]>(
@@ -293,6 +306,7 @@ export function collaborationRoutes(pool: Pool, storage: StorageService): Router
       if (!target || target.role === 'creator') throw new AppError('TARGET_MEMBER_NOT_FOUND', '目标成员不存在', 404);
       await deactivateMember(connection, target, 'removed');
       await connection.execute(`UPDATE life_module SET active_member_count = active_member_count - 1, version = version + 1 WHERE module_id = ?`, [moduleId]);
+      await notifyRemainingMembersOfDeparture(connection, moduleId, target, 'member_removed');
       await connection.execute(
         `INSERT INTO notification (user_id, type, title, content, module_id, target_type, target_id, action_type, action_status)
          VALUES (?, 'member_removed', '你已被移出模块', '你已不再是该模块成员', ?, 'member', ?, 'none', 'none')`,
@@ -314,6 +328,7 @@ export function collaborationRoutes(pool: Pool, storage: StorageService): Router
       const [rows] = await connection.execute<MemberRow[]>('SELECT * FROM module_member WHERE member_instance_id = ? FOR UPDATE', [access.member_instance_id]);
       await deactivateMember(connection, rows[0], 'self_exit');
       await connection.execute(`UPDATE life_module SET active_member_count = active_member_count - 1, version = version + 1 WHERE module_id = ?`, [moduleId]);
+      await notifyRemainingMembersOfDeparture(connection, moduleId, rows[0], 'member_exit');
       await audit(connection, moduleId, user.userId, 'member_leave', 'member', String(access.member_instance_id));
       return { moduleId: publicId('m', moduleId), status: 'exited' };
     });
@@ -377,10 +392,49 @@ function resolveJoin(pool: Pool, action: 'approve' | 'reject') {
         [status, user.userId, memberId, applicationId],
       );
       await connection.execute(
-        `UPDATE notification SET action_status = 'resolved', updated_at = UTC_TIMESTAMP(3)
+        `UPDATE notification
+            SET action_status = 'resolved', is_read = 1,
+                read_at = COALESCE(read_at, UTC_TIMESTAMP(3)), updated_at = UTC_TIMESTAMP(3)
           WHERE target_type = 'join_application' AND target_id = ?`,
         [applicationId],
       );
+      await connection.execute(
+        `UPDATE module_inbox_item
+            SET title = ?, content = ?, status = IF(recipient_user_id = ?, 'read', 'unread'),
+                updated_at = UTC_TIMESTAMP(3), expire_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 30 DAY)
+          WHERE target_type = 'join_application' AND target_id = ? AND status IN ('unread', 'read')`,
+        [action === 'approve' ? '成员已加入' : '加入申请未通过',
+          action === 'approve'
+            ? `「${application.applicant_name_snapshot}」已加入模块`
+            : `「${application.applicant_name_snapshot}」的加入申请已被拒绝`,
+          user.userId, applicationId],
+      );
+      if (action === 'approve' && memberId) {
+        const joinContent = `「${application.applicant_name_snapshot}」已加入模块`;
+        const dedupeKey = `member_join:${memberId}`;
+        await connection.execute(
+          `INSERT IGNORE INTO module_inbox_item
+             (module_id, recipient_user_id, type, title, content, target_type, target_id,
+              status, dedupe_key, expire_at)
+           SELECT ?, user_id, 'member_change', '成员已加入', ?, 'member', ?,
+                  'unread', ?, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 30 DAY)
+             FROM module_member
+            WHERE module_id = ? AND status = 'active' AND user_id <> ? AND user_id <> ?`,
+          [application.module_id, joinContent, memberId, dedupeKey, application.module_id,
+            user.userId, application.applicant_user_id],
+        );
+        await connection.execute(
+          `INSERT IGNORE INTO notification
+             (user_id, type, title, content, module_id, target_type, target_id,
+              action_type, action_status, dedupe_key)
+           SELECT user_id, 'member_change', '成员已加入', ?, ?, 'member', ?,
+                  'none', 'none', ?
+             FROM module_member
+            WHERE module_id = ? AND status = 'active' AND user_id <> ? AND user_id <> ?`,
+          [joinContent, application.module_id, memberId, dedupeKey, application.module_id,
+            user.userId, application.applicant_user_id],
+        );
+      }
       await connection.execute(
         `INSERT INTO notification
            (user_id, type, title, content, module_id, target_type, target_id, action_type, action_status)
@@ -407,6 +461,7 @@ async function loadInvite(
 ): Promise<InviteRow> {
   const [rows] = await database.execute<InviteRow[]>(
     `SELECT i.*, m.name AS module_name, m.description AS module_description, m.status AS module_status,
+            m.creator_user_id,
             m.active_member_count, m.member_limit, mm.nickname_snapshot AS inviter_name,
             mm.avatar_file_key_snapshot AS inviter_avatar_file_key
        FROM invite_token i
@@ -422,6 +477,7 @@ async function loadInvite(
 async function loadInviteBySecret(database: { execute: Pool['execute'] }, secret: string): Promise<InviteRow> {
   const [rows] = await database.execute<InviteRow[]>(
     `SELECT i.*, m.name AS module_name, m.description AS module_description, m.status AS module_status,
+            m.creator_user_id,
             m.active_member_count, m.member_limit, mm.nickname_snapshot AS inviter_name,
             mm.avatar_file_key_snapshot AS inviter_avatar_file_key
        FROM invite_token i
@@ -496,6 +552,33 @@ async function deactivateMember(
   member: MemberRow,
   reason: 'removed' | 'self_exit',
 ): Promise<void> {
+  const today = shanghaiDate();
+  await connection.execute(
+    `INSERT INTO record_revision
+       (record_id, revision_no, media_id, remark, changed_by_user_id, change_type)
+     SELECT r.record_id,
+            COALESCE((SELECT MAX(rr.revision_no) FROM record_revision rr WHERE rr.record_id = r.record_id), 0) + 1,
+            r.media_id, r.remark, ?, 'delete'
+       FROM life_record r
+      WHERE r.member_instance_id = ? AND r.record_date = ?
+        AND r.status IN ('pending', 'active', 'locked')`,
+    [member.user_id, member.member_instance_id, today],
+  );
+  await connection.execute(
+    `UPDATE reaction re
+       JOIN life_record r ON r.record_id = re.record_id
+        SET re.status = 'cancelled', re.cancelled_at = UTC_TIMESTAMP(3), re.version = re.version + 1
+      WHERE r.member_instance_id = ? AND r.record_date = ?
+        AND r.status IN ('pending', 'active', 'locked') AND re.status = 'active'`,
+    [member.member_instance_id, today],
+  );
+  await connection.execute(
+    `UPDATE life_record
+        SET status = 'deleted', deleted_at = UTC_TIMESTAMP(3), version = version + 1
+      WHERE member_instance_id = ? AND record_date = ?
+        AND status IN ('pending', 'active', 'locked')`,
+    [member.member_instance_id, today],
+  );
   await connection.execute(
     `UPDATE module_member SET status = ?, left_at = UTC_TIMESTAMP(3), leave_reason = ?, version = version + 1
       WHERE member_instance_id = ? AND status = 'active'`,
@@ -512,6 +595,39 @@ async function deactivateMember(
     [member.member_instance_id],
   );
   await connection.execute(`UPDATE reminder_subscription SET enabled = 0 WHERE member_instance_id = ?`, [member.member_instance_id]);
+}
+
+async function notifyRemainingMembersOfDeparture(
+  connection: PoolConnection,
+  moduleId: string,
+  departedMember: MemberRow,
+  dedupePrefix: 'member_exit' | 'member_removed',
+): Promise<void> {
+  const dedupeKey = `${dedupePrefix}:${departedMember.member_instance_id}`;
+  await connection.execute(
+    `INSERT IGNORE INTO module_inbox_item
+       (module_id, recipient_user_id, type, title, content, target_type, target_id,
+        status, dedupe_key, expire_at)
+     SELECT mm.module_id, mm.user_id, 'member_change', '成员退出',
+            CONCAT('「', ?, '」已退出「', m.name, '」'), 'member', ?,
+            'unread', ?, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 30 DAY)
+       FROM module_member mm
+       JOIN life_module m ON m.module_id = mm.module_id
+      WHERE mm.module_id = ? AND mm.status = 'active'`,
+    [departedMember.nickname_snapshot, departedMember.member_instance_id, dedupeKey, moduleId],
+  );
+  await connection.execute(
+    `INSERT IGNORE INTO notification
+       (user_id, type, title, content, module_id, target_type, target_id,
+        action_type, action_status, dedupe_key)
+     SELECT mm.user_id, 'member_change', '成员退出',
+            CONCAT('「', ?, '」已退出「', m.name, '」'), mm.module_id, 'member', ?,
+            'none', 'none', ?
+       FROM module_member mm
+       JOIN life_module m ON m.module_id = mm.module_id
+      WHERE mm.module_id = ? AND mm.status = 'active'`,
+    [departedMember.nickname_snapshot, departedMember.member_instance_id, dedupeKey, moduleId],
+  );
 }
 
 function invitePublicId(id: string, secret: string): string {

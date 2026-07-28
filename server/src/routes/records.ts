@@ -431,13 +431,17 @@ export function recordRoutes(
       loadMembers(pool, moduleId),
       loadMonthRecords(pool, moduleId, month),
     ]);
+    const today = shanghaiDate();
+    const activeMemberIds = new Set(members.map((member) => String(member.member_instance_id)));
+    const visibleRecords = records.filter((record) =>
+      sqlDate(record.record_date) !== today || activeMemberIds.has(String(record.member_instance_id)));
     const slots = layoutSlots(members.length);
     const memberLayout = members.map((member, index) => ({
       memberInstanceId: publicId('mi', member.member_instance_id),
       joinSequence: member.join_sequence,
       layoutSlot: slots[index],
     }));
-    const recordViews = await Promise.all(records.map(async (record) => ({
+    const recordViews = await Promise.all(visibleRecords.map(async (record) => ({
       date: sqlDate(record.record_date),
       memberInstanceId: String(record.member_instance_id),
       recordId: publicId('r', record.record_id),
@@ -445,7 +449,6 @@ export function recordRoutes(
       source: record.source,
       stickerThumbnailUrl: record.status === 'pending' ? null : await storage.signedUrl(record.sticker_thumbnail_file_key),
     })));
-    const today = shanghaiDate();
     const dayCount = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
     const days = Array.from({ length: dayCount }, (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`).map((date) => {
       const matching = recordViews.filter((record) => record.date === date);
@@ -485,10 +488,13 @@ export function recordRoutes(
     const date = queryString(request.params.recordDate);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new AppError('VALIDATION_ERROR', '日期格式不正确', 422);
     const access = await requireMember(pool, moduleId, user.userId, { allowPendingDelete: true });
-    const [records] = await pool.execute<RecordRow[]>(recordSelect('WHERE r.module_id = ? AND r.record_date = ? AND r.status IN (\'pending\', \'active\', \'locked\')'), [moduleId, date]);
+    const today = shanghaiDate();
+    const activeMemberFilter = date === today
+      ? " AND EXISTS (SELECT 1 FROM module_member mm WHERE mm.member_instance_id = r.member_instance_id AND mm.status = 'active')"
+      : '';
+    const [records] = await pool.execute<RecordRow[]>(recordSelect(`WHERE r.module_id = ? AND r.record_date = ? AND r.status IN ('pending', 'active', 'locked')${activeMemberFilter}`), [moduleId, date]);
     const formalRecords = records.filter((record) => ['active', 'locked'].includes(record.status));
     const serialized = await Promise.all(formalRecords.map((record) => serializeRecord(storage, record, user.userId)));
-    const today = shanghaiDate();
     const dateType = date === today ? 'today' : date > today ? 'future' : 'past';
     const current = records.find((record) => String(record.member_instance_id) === String(access.member_instance_id));
     ok(response, {

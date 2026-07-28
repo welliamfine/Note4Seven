@@ -83,7 +83,8 @@ export function authRoutes(pool: Pool, config: AppConfig, storage: StorageServic
       `SELECT
          COUNT(DISTINCT CASE WHEN r.status IN ('active', 'locked') THEN r.record_date END) AS recorded_days,
          COUNT(DISTINCT CASE WHEN mm.status = 'active' AND m.status = 'active' THEN mm.module_id END) AS active_module_count,
-         (SELECT COUNT(*) FROM notification n WHERE n.user_id = ? AND n.is_read = 0) AS unread_count
+         (SELECT COUNT(*) FROM notification n
+           WHERE n.user_id = ? AND n.is_read = 0 AND n.action_status <> 'resolved') AS unread_count
        FROM user_account u
        LEFT JOIN life_record r ON r.user_id = u.user_id
        LEFT JOIN module_member mm ON mm.user_id = u.user_id
@@ -122,7 +123,7 @@ export function authRoutes(pool: Pool, config: AppConfig, storage: StorageServic
         `UPDATE user_account SET nickname = ?, avatar_file_key = ?, version = version + 1 WHERE user_id = ?`,
         [body.nickname, avatarFileKey, user.userId],
       );
-      await syncAvatarReferences(connection, user.userId, avatarFileKey);
+      await syncProfileReferences(connection, user.userId, body.nickname, avatarFileKey);
       return {
         userId: publicId('u', user.userId),
         nickname: body.nickname,
@@ -135,36 +136,37 @@ export function authRoutes(pool: Pool, config: AppConfig, storage: StorageServic
   return router;
 }
 
-export async function syncAvatarReferences(
+export async function syncProfileReferences(
   connection: Pick<PoolConnection, 'execute'>,
   userId: string,
+  nickname: string,
   avatarFileKey: string | null,
 ): Promise<void> {
   await connection.execute(
     `UPDATE module_member
-        SET avatar_file_key_snapshot = ?, version = version + 1
+        SET nickname_snapshot = ?, avatar_file_key_snapshot = ?, version = version + 1
       WHERE user_id = ? AND status = 'active'`,
-    [avatarFileKey, userId],
+    [nickname, avatarFileKey, userId],
   );
   await connection.execute(
     `UPDATE life_record r
        JOIN module_member mm ON mm.member_instance_id = r.member_instance_id
-        SET r.avatar_file_key_snapshot = ?
+        SET r.display_name_snapshot = ?, r.avatar_file_key_snapshot = ?
       WHERE r.user_id = ? AND mm.status = 'active'`,
-    [avatarFileKey, userId],
+    [nickname, avatarFileKey, userId],
   );
   await connection.execute(
     `UPDATE reaction re
        JOIN module_member mm ON mm.member_instance_id = re.reactor_member_instance_id
-        SET re.reactor_avatar_file_key_snapshot = ?
+        SET re.reactor_name_snapshot = ?, re.reactor_avatar_file_key_snapshot = ?
       WHERE re.reactor_user_id = ? AND mm.status = 'active'`,
-    [avatarFileKey, userId],
+    [nickname, avatarFileKey, userId],
   );
   await connection.execute(
     `UPDATE join_application
-        SET applicant_avatar_file_key_snapshot = ?
+        SET applicant_name_snapshot = ?, applicant_avatar_file_key_snapshot = ?
       WHERE applicant_user_id = ?`,
-    [avatarFileKey, userId],
+    [nickname, avatarFileKey, userId],
   );
 }
 

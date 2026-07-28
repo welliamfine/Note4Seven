@@ -1,7 +1,7 @@
 import type { PoolConnection } from 'mysql2/promise';
 import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config';
-import { syncAvatarReferences, trustedOpenId } from '../src/routes/auth';
+import { syncProfileReferences, trustedOpenId } from '../src/routes/auth';
 
 const config = loadConfig({
   MYSQL_ADDRESS: 'db.internal:3306',
@@ -47,22 +47,26 @@ describe('trustedOpenId', () => {
   });
 });
 
-describe('profile avatar propagation', () => {
-  it('updates every visible avatar source while preserving anonymized memberships', async () => {
+describe('profile identity propagation', () => {
+  it('updates every visible name and avatar source while preserving anonymized memberships', async () => {
     const execute = vi.fn().mockResolvedValue([{ affectedRows: 1 }]);
     const connection = { execute } as unknown as Pick<PoolConnection, 'execute'>;
 
-    await syncAvatarReferences(connection, '42', 'avatars/42/latest.webp');
+    await syncProfileReferences(connection, '42', '小七', 'avatars/42/latest.webp');
 
     expect(execute).toHaveBeenCalledTimes(4);
     const statements = execute.mock.calls.map(([statement]) => String(statement).replace(/\s+/g, ' ').trim());
     expect(statements[0]).toContain('UPDATE module_member');
+    expect(statements[0]).toContain('nickname_snapshot = ?');
     expect(statements[1]).toContain('UPDATE life_record r');
+    expect(statements[1]).toContain('display_name_snapshot = ?');
     expect(statements[2]).toContain('UPDATE reaction re');
+    expect(statements[2]).toContain('reactor_name_snapshot = ?');
     expect(statements[3]).toContain('UPDATE join_application');
+    expect(statements[3]).toContain('applicant_name_snapshot = ?');
     expect(statements.slice(0, 3).every((statement) => statement.includes("status = 'active'"))).toBe(true);
     expect(execute.mock.calls.every(([, parameters]) => (
-      JSON.stringify(parameters) === JSON.stringify(['avatars/42/latest.webp', '42'])
+      JSON.stringify(parameters) === JSON.stringify(['小七', 'avatars/42/latest.webp', '42'])
     ))).toBe(true);
   });
 });

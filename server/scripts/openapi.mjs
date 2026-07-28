@@ -71,7 +71,7 @@ for (const route of routes) {
 const document = {
   openapi: '3.1.0',
   info: {
-    title: '记录我的一辈子 API',
+    title: '七日记（Note4Seven）API',
     version: '0.1.0',
     description: 'Generated route inventory with shared runtime contracts. Examples must use synthetic data.',
   },

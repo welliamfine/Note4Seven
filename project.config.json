@@ -3,8 +3,8 @@
   "compileType": "miniprogram",
   "miniprogramRoot": "dist/",
   "cloudfunctionRoot": "cloudfunctions/",
-  "projectname": "记录我的一辈子",
-  "description": "记录我的一辈子",
+  "projectname": "七日记",
+  "description": "七日记（Note4Seven）",
   "setting": {
     "es6": true,
     "postcss": true,

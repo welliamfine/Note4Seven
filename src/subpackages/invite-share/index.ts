@@ -47,7 +47,7 @@ const drawInviteCard = (
   context.setTextAlign('center');
   context.setFillStyle('#c4a58e');
   context.setFontSize(30);
-  context.fillText('NoteMyLife', 375, 116);
+  context.fillText('Note4Seven', 375, 116);
 
   context.setFillStyle('#514b45');
   context.setFontSize(42);
@@ -99,14 +99,14 @@ const drawInviteCard = (
   });
   context.setFillStyle('#92857b');
   context.setFontSize(28);
-  context.fillText('Note', 375, 674);
+  context.fillText('Note4Seven', 375, 674);
 
   context.setFillStyle('#6d655e');
   context.setFontSize(22);
   context.fillText(`邀请码 ${preview.invite.inviteId.slice(-8).toUpperCase()}`, 375, 816);
   context.setFillStyle('#9a928a');
   context.setFontSize(20);
-  context.fillText('通过 NoteMyLife 小程序分享链接加入', 375, 858);
+  context.fillText('通过 Note4Seven 小程序分享链接加入', 375, 858);
   context.setFillStyle('#b0a79f');
   context.setFontSize(18);
   context.fillText('邀请卡片有效期为 24 小时', 375, 910);

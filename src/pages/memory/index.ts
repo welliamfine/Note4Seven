@@ -5,18 +5,22 @@ import { waitForSheetMotion } from '../../utils/sheet-motion';
 import { createStickerDelays, STICKER_MOTION, waitForAppRouteDone } from '../../utils/sticker-motion';
 import { drawStickerWithOutline } from '../../utils/sticker-outline';
 import { hasOpenBottomSheet } from '../../utils/tab-bar-visibility';
+import { preloadImageSources } from '../../utils/image-preload';
 
 interface AnimatedSticker { id: string; path: string; popDelay: number }
 let timers: Array<ReturnType<typeof setTimeout>> = [];
 let showToken = 0;
+let groupChangeToken = 0;
+let loadToken = 0;
 const clearTimers = () => { timers.forEach((timer) => clearTimeout(timer)); timers = []; };
+const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 Page({
   data: {
     month: monthOf(shanghaiDate()), monthLabel: '', moduleId: '', moduleName: '', modules: [] as MemoryModuleOption[],
     recordedDays: 0, moduleCount: 0, recordCount: 0, jointCompleted: 0, weeklyJointCompleted: 0, streakDays: 0,
     receivedReactions: 0, weeklyReceivedReactions: 0, mostUsedEmoji: '—', stickers: [] as AnimatedSticker[], stickerPhase: 'sticker-hidden',
-    stickerFinalDelay: 0, selectionOpen: false, selectionClosing: false, exporting: false,
+    stickerFinalDelay: 0, changingGroup: false, selectionOpen: false, selectionClosing: false, exporting: false,
   },
   onShow() {
     const token = ++showToken;
@@ -27,7 +31,9 @@ Page({
       this.setData({ moduleId: selection.moduleId, month: selection.month ?? this.data.month });
       wx.removeStorageSync('notemylife.memory.selection');
     }
-    void Promise.all([this.load(), waitForAppRouteDone()]).then(() => { if (token === showToken) this.playStickerAnimation(); });
+    void Promise.all([this.load(), waitForAppRouteDone()]).then(([loaded]) => {
+      if (loaded && token === showToken) this.playStickerAnimation();
+    });
   },
   syncTabBarVisibility() {
     this.getTabBar?.()?.setData({
@@ -35,21 +41,68 @@ Page({
       hidden: hasOpenBottomSheet(this.data.selectionOpen),
     });
   },
-  async load(forceChange = false) {
+  async load(
+    forceChange = false,
+    beforeApply: Promise<void> = Promise.resolve(),
+    preserveOnFailure = false,
+    prepareItems?: (items: Array<{ stickerPath: string }>) => Promise<void>,
+  ): Promise<boolean> {
+    const currentLoadToken = ++loadToken;
     try {
       const view = await getMemoryView(this.data.moduleId || undefined, this.data.month, forceChange);
+      await prepareItems?.(view.items);
+      await beforeApply;
+      if (currentLoadToken !== loadToken) return false;
       const plan = createStickerDelays(view.items.map((item) => item.recordId));
-      this.setData({
-        month: view.month, monthLabel: monthLabel(view.month), moduleId: view.moduleId, moduleName: view.moduleName, modules: view.modules,
-        recordedDays: view.recordedDays, moduleCount: view.participatedModuleCount, recordCount: view.weeklyRecordCount,
-        jointCompleted: view.monthlyJointCompletedDays, weeklyJointCompleted: view.jointCompletedDays, streakDays: view.currentStreakDays,
-        receivedReactions: view.monthlyReceivedReactionCount, weeklyReceivedReactions: view.receivedReactionCount, mostUsedEmoji: view.mostUsedEmoji,
-        stickers: view.items.map((item) => ({ id: item.recordId, path: item.stickerPath, popDelay: plan.delays.get(item.recordId) ?? 0 })),
-        stickerFinalDelay: plan.finalDelay, stickerPhase: 'sticker-hidden',
-      });
-    } catch { this.setData({ stickers: [], moduleId: '', moduleName: '' }); }
+      await new Promise<void>((resolve) => this.setData({
+          month: view.month, monthLabel: monthLabel(view.month), moduleId: view.moduleId, moduleName: view.moduleName, modules: view.modules,
+          recordedDays: view.recordedDays, moduleCount: view.participatedModuleCount, recordCount: view.weeklyRecordCount,
+          jointCompleted: view.monthlyJointCompletedDays, weeklyJointCompleted: view.jointCompletedDays, streakDays: view.currentStreakDays,
+          receivedReactions: view.monthlyReceivedReactionCount, weeklyReceivedReactions: view.receivedReactionCount, mostUsedEmoji: view.mostUsedEmoji,
+          stickers: view.items.map((item) => ({ id: item.recordId, path: item.stickerPath, popDelay: plan.delays.get(item.recordId) ?? 0 })),
+          stickerFinalDelay: plan.finalDelay, stickerPhase: 'sticker-hidden',
+        }, resolve));
+      return true;
+    } catch {
+      await beforeApply;
+      if (currentLoadToken !== loadToken) return false;
+      if (preserveOnFailure) {
+        this.setData({ stickerPhase: 'sticker-visible' });
+        return false;
+      }
+      this.setData({ stickers: [], moduleId: '', moduleName: '' });
+      return false;
+    }
   },
-  changeGroup() { clearTimers(); void this.load(true).then(() => this.playStickerAnimation()); track('memory_change_group_click', { moduleId: this.data.moduleId, month: this.data.month }); },
+  async changeGroup() {
+    if (this.data.changingGroup) return;
+    const token = ++groupChangeToken;
+    clearTimers();
+    this.setData({ changingGroup: true });
+    track('memory_change_group_click', { moduleId: this.data.moduleId, month: this.data.month });
+    const loaded = await this.load(
+      true,
+      Promise.resolve(),
+      true,
+      async (items) => {
+        await preloadImageSources(items.map((item) => item.stickerPath));
+        if (token !== groupChangeToken) return;
+        if (!this.data.stickers.length) {
+          this.setData({ stickerPhase: 'sticker-hidden' });
+          return;
+        }
+        this.setData({ stickerPhase: 'sticker-leaving' });
+        await wait(STICKER_MOTION.oldPageFadeDuration);
+      },
+    );
+    if (token !== groupChangeToken) return;
+    if (loaded) {
+      this.playStickerAnimation();
+      await wait(STICKER_MOTION.pageSettledDelay + this.data.stickerFinalDelay + STICKER_MOTION.duration);
+      if (token !== groupChangeToken) return;
+    }
+    this.setData({ changingGroup: false });
+  },
   playStickerAnimation() {
     timers.push(setTimeout(() => this.setData({ stickerPhase: 'sticker-entering' }), STICKER_MOTION.pageSettledDelay));
     timers.push(setTimeout(() => this.setData({ stickerPhase: 'sticker-visible' }), STICKER_MOTION.pageSettledDelay + this.data.stickerFinalDelay + STICKER_MOTION.duration));
@@ -70,12 +123,12 @@ Page({
   async selectModule(event: WechatMiniprogram.TouchEvent) {
     this.setData({ moduleId: event.currentTarget.dataset.id as string });
     await this.dismissSelection();
-    void this.load().then(() => this.playStickerAnimation());
+    void this.load().then((loaded) => { if (loaded) this.playStickerAnimation(); });
   },
-  previousMonth() { this.setData({ month: previousMonth(this.data.month) }, () => void this.load().then(() => this.playStickerAnimation())); },
-  nextMonth() { const target = nextMonth(this.data.month); if (target > monthOf(shanghaiDate())) return; this.setData({ month: target }, () => void this.load().then(() => this.playStickerAnimation())); },
-  onHide() { showToken += 1; clearTimers(); },
-  onUnload() { showToken += 1; clearTimers(); },
+  previousMonth() { this.setData({ month: previousMonth(this.data.month) }, () => void this.load().then((loaded) => { if (loaded) this.playStickerAnimation(); })); },
+  nextMonth() { const target = nextMonth(this.data.month); if (target > monthOf(shanghaiDate())) return; this.setData({ month: target }, () => void this.load().then((loaded) => { if (loaded) this.playStickerAnimation(); })); },
+  onHide() { showToken += 1; groupChangeToken += 1; loadToken += 1; clearTimers(); this.setData({ changingGroup: false }); },
+  onUnload() { showToken += 1; groupChangeToken += 1; loadToken += 1; clearTimers(); },
   saveCard() {
     if (this.data.exporting || !this.data.moduleId) return;
     this.setData({ exporting: true }); wx.showLoading({ title: '正在生成卡片' });
@@ -93,7 +146,7 @@ Page({
       196,
     ));
     context.setFillStyle('#766e67'); context.setFontSize(24); context.fillText(`共同完成 ${this.data.jointCompleted} 天  ·  收到回应 ${this.data.receivedReactions} 次`, 64, 815);
-    context.setFillStyle('#b9a9a0'); context.setFontSize(20); context.fillText('NoteMyLife · 记录我的一辈子', 64, 920);
+    context.setFillStyle('#b9a9a0'); context.setFontSize(20); context.fillText('Note4Seven · 七日记', 64, 920);
     context.draw(false, () => wx.canvasToTempFilePath({ canvasId: 'memoryExportCanvas', width: 750, height: 1000, destWidth: 1500, destHeight: 2000,
       success: ({ tempFilePath }) => wx.saveImageToPhotosAlbum({ filePath: tempFilePath,
         success: () => { wx.hideLoading(); this.setData({ exporting: false }); wx.showToast({ title: '已保存到相册' }); track('memory_export_success', { moduleId: this.data.moduleId, month: this.data.month }); },

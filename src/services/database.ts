@@ -13,10 +13,11 @@ import type {
   ReminderSubscription,
   User,
 } from '../types/domain';
+import { DEFAULT_MODULE_TEMPLATES } from '../config/module-templates';
 import { addDays, shanghaiDate, shanghaiNowIso } from '../utils/date';
 
 const DATABASE_KEY = 'notemylife.alpha.database.v1';
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 8;
 
 export const STICKER_PATHS = [
   '/assets/stickers/group-1.png',
@@ -28,6 +29,13 @@ export const STICKER_PATHS = [
   '/assets/stickers/group-14.png',
   '/assets/stickers/group-15.png',
 ];
+
+const createDefaultTemplates = (): AppDatabase['templates'] => DEFAULT_MODULE_TEMPLATES.map((template) => ({
+  templateId: template.localTemplateId,
+  name: template.name,
+  description: template.description,
+  stickerPath: STICKER_PATHS[template.stickerIndex],
+}));
 
 const me: User = {
   userId: 'user_me',
@@ -201,6 +209,19 @@ function createSeedDatabase(): AppDatabase {
     createdAt: now,
     updatedAt: now,
     expireAt: makeupApprovals[0].expireAt,
+  }, {
+    itemId: 'inbox_seed_join',
+    moduleId: weekend.moduleId,
+    recipientUserId: me.userId,
+    type: 'join_application',
+    title: '新的加入申请',
+    content: '禾禾申请加入「周末去哪里」',
+    targetType: 'join_application',
+    targetId: 'application_seed_join',
+    status: 'unread',
+    createdAt: now,
+    updatedAt: now,
+    expireAt: joinApplications[0].expireAt,
   }];
 
   const reactions: Reaction[] = [{
@@ -245,26 +266,7 @@ function createSeedDatabase(): AppDatabase {
       { moduleId: weekend.moduleId, userId: me.userId, pinned: false },
     ],
     records,
-    templates: [
-      {
-        templateId: 'template_meal',
-        name: '今天吃什么',
-        description: '记录三餐，也分享彼此的生活',
-        stickerPath: STICKER_PATHS[5],
-      },
-      {
-        templateId: 'template_coffee',
-        name: '每日咖啡',
-        description: '留住每天不同的一杯',
-        stickerPath: STICKER_PATHS[0],
-      },
-      {
-        templateId: 'template_mood',
-        name: '今日小事',
-        description: '一张照片，记下今天最想留下的片刻',
-        stickerPath: STICKER_PATHS[3],
-      },
-    ],
+    templates: createDefaultTemplates(),
     reactions,
     makeupApprovals,
     inviteTokens: [],
@@ -339,6 +341,42 @@ function migrateToRc(database: AppDatabase): void {
   database.dailySnapshots ??= [];
   database.monthlyMemoryCards ??= [];
   database.privacyVersion ??= '2026-07-21';
+  database.schemaVersion = 5;
+}
+
+function migrateToNote4Seven(database: AppDatabase): void {
+  database.templates = createDefaultTemplates();
+  database.schemaVersion = 6;
+}
+
+function migrateTemplateCopy(database: AppDatabase): void {
+  database.templates = createDefaultTemplates();
+  database.schemaVersion = 7;
+}
+
+function migrateJoinApplicationsToModuleInbox(database: AppDatabase): void {
+  database.notifications
+    .filter((notification) => notification.targetType === 'join_application' && notification.targetId)
+    .forEach((notification) => {
+      if (database.moduleInboxItems.some((item) => item.recipientUserId === notification.userId
+        && item.targetType === 'join_application' && item.targetId === notification.targetId)) return;
+      const application = database.joinApplications.find((item) => item.applicationId === notification.targetId);
+      if (!application) return;
+      database.moduleInboxItems.push({
+        itemId: `inbox_${notification.notificationId}`,
+        moduleId: application.moduleId,
+        recipientUserId: notification.userId,
+        type: 'join_application',
+        title: notification.title,
+        content: notification.content,
+        targetType: 'join_application',
+        targetId: application.applicationId,
+        status: notification.actionStatus === 'resolved' ? 'resolved' : notification.isRead ? 'read' : 'unread',
+        createdAt: notification.createdAt,
+        updatedAt: notification.updatedAt,
+        expireAt: application.expireAt,
+      });
+    });
   database.schemaVersion = SCHEMA_VERSION;
 }
 
@@ -361,6 +399,15 @@ export function bootstrapDatabase(): void {
   if (existing?.schemaVersion === 4) {
     if (!existing.betaDemoSeeded) seedBetaDemoState(existing);
     migrateToRc(existing);
+  }
+  if (existing?.schemaVersion === 5) {
+    migrateToNote4Seven(existing);
+  }
+  if (existing?.schemaVersion === 6) {
+    migrateTemplateCopy(existing);
+  }
+  if (existing?.schemaVersion === 7) {
+    migrateJoinApplicationsToModuleInbox(existing);
     wx.setStorageSync(DATABASE_KEY, existing);
   } else if (existing?.schemaVersion === SCHEMA_VERSION && !existing.betaDemoSeeded) {
     seedBetaDemoState(existing);

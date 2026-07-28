@@ -1,14 +1,14 @@
 <view class="page-shell beta-page" style="padding-top:{{statusBarHeight}}px;">
   <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" />
-  <view class="beta-topbar content-layer"><text class="brand-script beta-brand">NoteMyLife</text><view class="beta-heading"><view class="beta-back" bindtap="goBack"><image src="/assets/ui/icons/chevron-left.svg" /></view><text class="beta-heading-title">通知中心</text><button class="mark-all" bindtap="markAll">全部已读</button></view></view>
+  <view class="beta-topbar content-layer"><text class="brand-script beta-brand">Note4Seven</text><view class="beta-heading"><view class="beta-back" bindtap="goBack"><image src="/assets/ui/icons/chevron-left.svg" /></view><text class="beta-heading-title">通知中心</text><button class="mark-all" bindtap="markAll">全部已读</button></view></view>
   <scroll-view class="beta-scroll content-layer" scroll-y enhanced show-scrollbar="{{false}}"><view class="beta-body notification-body">
     <view wx:if="{{loading}}" class="beta-loading">正在加载...</view>
     <view wx:elif="{{!notifications.length}}" class="beta-empty beta-glass">暂时没有新通知</view>
     <view wx:else class="notification-list">
       <view class="notification-card beta-glass" wx:for="{{notifications}}" wx:key="notificationId" data-id="{{item.notificationId}}" data-module="{{item.moduleId}}" bindtap="openNotification">
-        <view class="notification-head"><text class="notification-title">{{item.title}}</text><text wx:if="{{!item.isRead}}" class="unread-dot"></text></view>
+        <view class="notification-head"><text class="notification-title">{{item.title}}</text><text wx:if="{{!item.isRead && item.actionStatus !== 'resolved'}}" class="unread-dot"></text></view>
         <text class="notification-content">{{item.content}}</text><text class="notification-time">{{item.createdAt}}</text>
-        <view wx:if="{{item.application && item.application.status === 'pending' && item.actionStatus === 'actionable'}}" class="notification-actions" catchtap="stopPropagation"><button data-application="{{item.application.applicationId}}" data-action="reject" disabled="{{processingId}}" bindtap="resolveJoin">拒绝</button><button class="approve" data-application="{{item.application.applicationId}}" data-action="approve" disabled="{{processingId}}" bindtap="resolveJoin">同意</button></view>
+        <view wx:if="{{item.application && item.application.status === 'pending' && item.actionStatus === 'actionable'}}" class="notification-actions" catchtap="stopPropagation"><button data-application="{{item.application.applicationId}}" data-action="reject" disabled="{{item.isProcessing}}" bindtap="resolveJoin">拒绝</button><button class="approve" data-application="{{item.application.applicationId}}" data-action="approve" disabled="{{item.isProcessing}}" bindtap="resolveJoin">同意</button></view>
         <text wx:elif="{{item.application}}" class="notification-result">{{item.application.status === 'approved' ? '已通过' : item.application.status === 'rejected' ? '已拒绝' : '已处理'}}</text>
       </view>
     </view>

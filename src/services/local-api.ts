@@ -42,6 +42,68 @@ function activeMembers(module: LifeModule): ModuleMember[] {
   return module.members.filter((item) => item.active).sort((left, right) => left.joinSequence - right.joinSequence);
 }
 
+function notifyRemainingMembersOfDeparture(
+  database: AppDatabase,
+  module: LifeModule,
+  departedMember: ModuleMember,
+  now: string,
+): void {
+  const content = `「${departedMember.nickname}」已退出「${module.name}」`;
+  activeMembers(module).forEach((member) => {
+    database.moduleInboxItems.push({
+      itemId: createId('inbox'),
+      moduleId: module.moduleId,
+      recipientUserId: member.userId,
+      type: 'member_change',
+      title: '成员退出',
+      content,
+      targetType: 'member',
+      targetId: departedMember.memberInstanceId,
+      status: 'unread',
+      createdAt: now,
+      updatedAt: now,
+      expireAt: shanghaiNowIso(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
+    });
+    database.notifications.push({
+      notificationId: createId('notification'),
+      userId: member.userId,
+      type: 'member_change',
+      title: '成员退出',
+      content,
+      moduleId: module.moduleId,
+      targetType: 'member',
+      targetId: departedMember.memberInstanceId,
+      actionType: 'none',
+      actionStatus: 'none',
+      isRead: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+}
+
+function deleteTodayRecordsForMember(database: AppDatabase, moduleId: string, memberInstanceId: string): void {
+  const today = shanghaiDate();
+  const recordIds = new Set(database.records
+    .filter((record) => record.moduleId === moduleId
+      && record.memberInstanceId === memberInstanceId
+      && record.recordDate === today)
+    .map((record) => record.recordId));
+  if (!recordIds.size) return;
+  database.records = database.records.filter((record) => !recordIds.has(record.recordId));
+  database.reactions = database.reactions.filter((reaction) => !recordIds.has(reaction.recordId));
+  recordIds.forEach((recordId) => localCheckinStatuses.delete(recordId));
+}
+
+function purgeExitedMemberTodayRecords(database: AppDatabase): void {
+  database.modules.forEach((module) => {
+    const activeMemberIds = new Set(activeMembers(module).map((member) => member.memberInstanceId));
+    module.members
+      .filter((member) => !activeMemberIds.has(member.memberInstanceId))
+      .forEach((member) => deleteTodayRecordsForMember(database, module.moduleId, member.memberInstanceId));
+  });
+}
+
 function slotsFor(memberCount: number): string[] {
   if (memberCount === 1) return ['center'];
   if (memberCount === 2) return ['top-center', 'bottom-center'];
@@ -104,10 +166,13 @@ export async function getTemplates(): Promise<ModuleTemplate[]> {
   return readDatabase().templates;
 }
 
-export async function getHomeModules(): Promise<{ pinned: HomeModuleView[]; normal: HomeModuleView[] }> {
+export async function getHomeModules(
+  _options: { reconcileNotifications?: boolean } = {},
+): Promise<{ pinned: HomeModuleView[]; normal: HomeModuleView[] }> {
   await delay();
   const database = updateDatabase((current) => {
     purgeExpiredModules(current);
+    purgeExitedMemberTodayRecords(current);
     return current;
   });
   const today = shanghaiDate();
@@ -116,19 +181,26 @@ export async function getHomeModules(): Promise<{ pinned: HomeModuleView[]; norm
   );
 
   const views = participating.map<HomeModuleView>((module) => {
+    const activeMemberIds = new Set(activeMembers(module).map((member) => member.memberInstanceId));
     const preference = database.preferences.find(
       (item) => item.moduleId === module.moduleId && item.userId === database.currentUser.userId,
     );
     const todayRecords = database.records
-      .filter((record) => record.moduleId === module.moduleId && record.recordDate === today && isFormalRecord(record))
+      .filter((record) => record.moduleId === module.moduleId
+        && activeMemberIds.has(record.memberInstanceId)
+        && record.recordDate === today
+        && isFormalRecord(record))
       .sort((left, right) => left.firstEffectiveAt.localeCompare(right.firstEffectiveAt))
       .slice(-4);
     return {
       ...module,
       members: activeMembers(module),
       pinned: Boolean(preference?.pinned),
+      unreadInboxCount: database.moduleInboxItems.filter((item) => item.moduleId === module.moduleId
+        && item.recipientUserId === database.currentUser.userId && item.status === 'unread').length,
       todayPreviewItems: todayRecords.map((record, index) => ({
         recordId: record.recordId,
+        memberInstanceId: record.memberInstanceId,
         stickerPath: record.stickerPath,
         displayOrder: index,
       })),
@@ -192,6 +264,7 @@ export async function removeModuleForCurrentUser(moduleId: string): Promise<'del
             item.updatedAt = now;
           });
       });
+    deleteTodayRecordsForMember(database, moduleId, currentMember.memberInstanceId);
     database.reactions
       .filter((reaction) => reaction.reactorMemberInstanceId === currentMember.memberInstanceId)
       .forEach((reaction) => {
@@ -204,6 +277,7 @@ export async function removeModuleForCurrentUser(moduleId: string): Promise<'del
       (preference) => !(preference.moduleId === moduleId && preference.userId === database.currentUser.userId),
     );
     module.updatedAt = now;
+    notifyRemainingMembersOfDeparture(database, module, currentMember, now);
     addAudit(database, 'self_exit_module', moduleId, currentMember.memberInstanceId);
     return 'left';
   });
@@ -273,6 +347,10 @@ export async function getModule(moduleId: string): Promise<LifeModule> {
   return { ...module, members: activeMembers(module) };
 }
 
+export async function refreshModule(moduleId: string): Promise<LifeModule> {
+  return getModule(moduleId);
+}
+
 export async function getCalendar(moduleId: string, month: string): Promise<CalendarCell[]> {
   await delay(140);
   const database = readDatabase();
@@ -280,12 +358,16 @@ export async function getCalendar(moduleId: string, month: string): Promise<Cale
   if (!module) throw new Error('MODULE_NOT_FOUND');
   findActiveMember(database, module);
   const members = activeMembers(module);
+  const activeMemberIds = new Set(members.map((member) => member.memberInstanceId));
   const currentMember = members.find((member) => member.userId === database.currentUser.userId);
   const slots = slotsFor(members.length);
   const today = shanghaiDate();
   return buildMonthGrid(month).map((cell) => {
     const records = database.records
-      .filter((record) => record.moduleId === moduleId && record.recordDate === cell.date && isFormalRecord(record))
+      .filter((record) => record.moduleId === moduleId
+        && record.recordDate === cell.date
+        && isFormalRecord(record)
+        && (cell.date !== today || activeMemberIds.has(record.memberInstanceId)))
       .map<CalendarRecordView>((record) => {
         const targetMember = members.find((item) => item.memberInstanceId === record.memberInstanceId) ?? members[0];
         const memberIndex = Math.max(0, members.findIndex((item) => item.memberInstanceId === record.memberInstanceId));
@@ -313,8 +395,12 @@ export async function getDateRecords(moduleId: string, recordDate: string): Prom
   const module = database.modules.find((item) => item.moduleId === moduleId);
   if (!module) throw new Error('MODULE_NOT_FOUND');
   findActiveMember(database, module);
+  const activeMemberIds = new Set(activeMembers(module).map((member) => member.memberInstanceId));
   return database.records
-    .filter((record) => record.moduleId === moduleId && record.recordDate === recordDate && isFormalRecord(record))
+    .filter((record) => record.moduleId === moduleId
+      && record.recordDate === recordDate
+      && isFormalRecord(record)
+      && (recordDate !== shanghaiDate() || activeMemberIds.has(record.memberInstanceId)))
     .sort((left, right) => left.firstEffectiveAt.localeCompare(right.firstEffectiveAt));
 }
 
@@ -586,6 +672,12 @@ function expireBetaState(database: AppDatabase): void {
     const application = database.joinApplications.find((item) => item.applicationId === notification.targetId);
     if (!application || application.status !== 'pending') notification.actionStatus = 'expired';
   });
+  database.moduleInboxItems
+    .filter((item) => item.targetType === 'join_application' && item.status !== 'resolved')
+    .forEach((item) => {
+      const application = database.joinApplications.find((candidate) => candidate.applicationId === item.targetId);
+      if (!application || application.status === 'expired' || application.status === 'cancelled') item.status = 'expired';
+    });
 }
 
 export interface MemberManagementView {
@@ -684,6 +776,7 @@ export async function removeModuleMember(moduleId: string, targetMemberInstanceI
             item.updatedAt = now;
           });
       });
+    deleteTodayRecordsForMember(database, moduleId, target.memberInstanceId);
     database.reactions
       .filter((reaction) => reaction.reactorMemberInstanceId === target.memberInstanceId)
       .forEach((reaction) => {
@@ -694,12 +787,13 @@ export async function removeModuleMember(moduleId: string, targetMemberInstanceI
     database.preferences = database.preferences.filter(
       (preference) => !(preference.moduleId === moduleId && preference.userId === target.userId),
     );
+    notifyRemainingMembersOfDeparture(database, module, target, now);
     database.notifications.push({
       notificationId: createId('notification'),
       userId: target.userId,
       type: 'member_removed',
       title: '你已被移出模块',
-      content: `你已无法继续访问「${module.name}」，历史记录将匿名保留`,
+      content: `你已无法继续访问「${module.name}」，历史日期记录将匿名保留`,
       moduleId,
       targetType: 'module',
       targetId: moduleId,
@@ -832,6 +926,20 @@ export async function submitJoinApplication(inviteId: string): Promise<JoinAppli
       createdAt: now,
       updatedAt: now,
     });
+    database.moduleInboxItems.push({
+      itemId: createId('inbox'),
+      moduleId: module.moduleId,
+      recipientUserId: module.creatorUserId,
+      type: 'join_application',
+      title: '新的加入申请',
+      content: `${database.currentUser.nickname}申请加入「${module.name}」`,
+      targetType: 'join_application',
+      targetId: application.applicationId,
+      status: 'unread',
+      createdAt: now,
+      updatedAt: now,
+      expireAt: application.expireAt,
+    });
     return application;
   });
 }
@@ -863,6 +971,25 @@ export function getUnreadNotificationCount(): number {
   return readDatabase().notifications.filter((item) => item.userId === readDatabase().currentUser.userId && !item.isRead).length;
 }
 
+function moduleInboxItemRequiresAction(database: AppDatabase, item: ModuleInboxItem): boolean {
+  if (item.targetType === 'join_application') {
+    return database.joinApplications.some((application) => application.applicationId === item.targetId && application.status === 'pending');
+  }
+  if (item.targetType === 'makeup_approval') {
+    return database.makeupApprovals.some((approval) => approval.approvalId === item.targetId && approval.status === 'pending');
+  }
+  return false;
+}
+
+function hasSynchronizedNotification(item: ModuleInboxItem): boolean {
+  return item.targetType === 'join_application' || item.type === 'member_change' || item.type === 'makeup_result';
+}
+
+export async function refreshUnreadNotificationCount(): Promise<number> {
+  await delay(30);
+  return getUnreadNotificationCount();
+}
+
 export async function markNotificationRead(notificationId: string): Promise<void> {
   await delay(50);
   updateDatabase((database) => {
@@ -872,18 +999,34 @@ export async function markNotificationRead(notificationId: string): Promise<void
     if (notification) {
       notification.isRead = true;
       notification.updatedAt = shanghaiNowIso();
+      if (notification.targetId
+        && (notification.targetType === 'join_application' || notification.type === 'member_change' || notification.type === 'makeup_result')) {
+        database.moduleInboxItems
+          .filter((item) => item.recipientUserId === database.currentUser.userId
+            && item.targetType === notification.targetType && item.targetId === notification.targetId && item.status === 'unread'
+            && !moduleInboxItemRequiresAction(database, item))
+          .forEach((item) => { item.status = 'read'; item.updatedAt = notification.updatedAt; });
+      }
     }
   });
 }
 
 export async function markAllNotificationsRead(): Promise<void> {
   await delay(60);
-  updateDatabase((database) => database.notifications
-    .filter((item) => item.userId === database.currentUser.userId)
-    .forEach((item) => {
+  updateDatabase((database) => {
+    const targets = database.notifications
+      .filter((item) => item.userId === database.currentUser.userId && item.targetId
+        && (item.targetType === 'join_application' || item.type === 'member_change' || item.type === 'makeup_result'));
+    database.notifications.filter((item) => item.userId === database.currentUser.userId).forEach((item) => {
       item.isRead = true;
       item.updatedAt = shanghaiNowIso();
-    }));
+    });
+    database.moduleInboxItems
+      .filter((item) => item.recipientUserId === database.currentUser.userId
+        && targets.some((notification) => notification.targetType === item.targetType && notification.targetId === item.targetId)
+        && item.status === 'unread' && !moduleInboxItemRequiresAction(database, item))
+      .forEach((item) => { item.status = 'read'; item.updatedAt = shanghaiNowIso(); });
+  });
 }
 
 export async function resolveJoinApplication(applicationId: string, action: 'approve' | 'reject'): Promise<JoinApplication> {
@@ -898,6 +1041,7 @@ export async function resolveJoinApplication(applicationId: string, action: 'app
     const currentMember = findActiveMember(database, module);
     if (currentMember.role !== 'creator') throw new Error('CREATOR_REQUIRED');
     const now = shanghaiNowIso();
+    let joinedMember: ModuleMember | undefined;
     if (action === 'approve') {
       if (activeMembers(module).length >= MEMBER_LIMIT) throw new Error('MODULE_FULL');
       if (activeMembers(module).some((member) => member.userId === application.applicantUserId)) {
@@ -917,6 +1061,7 @@ export async function resolveJoinApplication(applicationId: string, action: 'app
           active: true,
         };
         module.members.push(member);
+        joinedMember = member;
         module.mode = 'group';
         application.status = 'approved';
         application.resultMemberInstanceId = member.memberInstanceId;
@@ -935,6 +1080,53 @@ export async function resolveJoinApplication(applicationId: string, action: 'app
         notification.isRead = true;
         notification.updatedAt = now;
       });
+    database.moduleInboxItems
+      .filter((item) => item.targetType === 'join_application' && item.targetId === applicationId)
+      .forEach((item) => {
+        item.title = action === 'approve' ? '成员已加入' : '加入申请未通过';
+        item.content = action === 'approve'
+          ? `「${application.applicantNameSnapshot}」已加入「${module.name}」`
+          : `「${application.applicantNameSnapshot}」的加入申请已被拒绝`;
+        item.status = item.recipientUserId === database.currentUser.userId ? 'read' : 'unread';
+        item.updatedAt = now;
+        item.expireAt = shanghaiNowIso(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+      });
+    if (joinedMember) {
+      const content = `「${joinedMember.nickname}」已加入「${module.name}」`;
+      activeMembers(module)
+        .filter((member) => member.userId !== database.currentUser.userId && member.userId !== joinedMember!.userId)
+        .forEach((member) => {
+          database.moduleInboxItems.push({
+            itemId: createId('inbox'),
+            moduleId: module.moduleId,
+            recipientUserId: member.userId,
+            type: 'member_change',
+            title: '成员已加入',
+            content,
+            targetType: 'member',
+            targetId: joinedMember!.memberInstanceId,
+            status: 'unread',
+            createdAt: now,
+            updatedAt: now,
+            expireAt: shanghaiNowIso(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
+          });
+          database.notifications.push({
+            notificationId: createId('notification'),
+            userId: member.userId,
+            type: 'member_change',
+            title: '成员已加入',
+            content,
+            moduleId: module.moduleId,
+            targetType: 'member',
+            targetId: joinedMember!.memberInstanceId,
+            actionType: 'none',
+            actionStatus: 'none',
+            isRead: false,
+            createdAt: now,
+            updatedAt: now,
+          });
+        });
+    }
     database.notifications.push({
       notificationId: createId('notification'),
       userId: application.applicantUserId,
@@ -1162,6 +1354,8 @@ export async function submitMakeupRecord(input: SubmitMakeupInput): Promise<{ re
 
 export interface ModuleInboxView extends ModuleInboxItem {
   approval?: MakeupApproval;
+  application?: JoinApplication;
+  notificationId?: string;
   applicantName?: string;
   stickerPath?: string;
 }
@@ -1184,7 +1378,12 @@ export async function getModuleInbox(moduleId: string): Promise<ModuleInboxView[
           ? module.members.find((member) => member.memberInstanceId === approval.applicantMemberInstanceId)
           : undefined;
         const record = approval ? database.records.find((candidate) => candidate.recordId === approval.recordId) : undefined;
-        return { ...item, approval, applicantName: applicant?.nickname, stickerPath: record?.stickerPath };
+        const application = item.targetType === 'join_application'
+          ? database.joinApplications.find((candidate) => candidate.applicationId === item.targetId)
+          : undefined;
+        const notification = application ? database.notifications.find((candidate) => candidate.userId === database.currentUser.userId
+          && candidate.targetType === 'join_application' && candidate.targetId === application.applicationId) : undefined;
+        return { ...item, approval, application, notificationId: notification?.notificationId, applicantName: applicant?.nickname, stickerPath: record?.stickerPath };
       });
   });
 }
@@ -1196,13 +1395,23 @@ export function getModuleInboxCount(moduleId: string): number {
   ).length;
 }
 
-export async function markModuleInboxRead(itemId: string): Promise<void> {
+export async function markModuleInboxRead(itemId: string, _notificationId?: string, _moduleId?: string): Promise<void> {
   await delay(40);
   updateDatabase((database) => {
     const item = database.moduleInboxItems.find(
       (candidate) => candidate.itemId === itemId && candidate.recipientUserId === database.currentUser.userId,
     );
-    if (item?.status === 'unread') item.status = 'read';
+    if (!item || moduleInboxItemRequiresAction(database, item)) return;
+    if (item?.status === 'unread') {
+      item.status = 'read';
+      item.updatedAt = shanghaiNowIso();
+    }
+    if (hasSynchronizedNotification(item)) {
+      database.notifications
+        .filter((notification) => notification.userId === database.currentUser.userId
+          && notification.targetType === item.targetType && notification.targetId === item.targetId)
+        .forEach((notification) => { notification.isRead = true; notification.updatedAt = shanghaiNowIso(); });
+    }
   });
 }
 
@@ -1228,10 +1437,14 @@ export async function resolveMakeupApproval(approvalId: string, action: 'approve
     record.updatedAt = now;
     if (action === 'approve') ensureSnapshotForDate(database, module, approval.targetDate);
     database.moduleInboxItems
-      .filter((item) => item.targetId === approvalId)
+      .filter((item) => item.targetType === 'makeup_approval' && item.targetId === approvalId)
       .forEach((item) => {
-        item.status = 'resolved';
+        item.type = 'makeup_result';
+        item.title = '补卡已处理';
+        item.content = `「${currentMember.nickname}」已${action === 'approve' ? '通过' : '拒绝'} ${approval.targetDate} 的补卡申请`;
+        item.status = item.recipientUserId === database.currentUser.userId ? 'read' : 'unread';
         item.updatedAt = now;
+        item.expireAt = shanghaiNowIso(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
       });
     database.moduleInboxItems.push({
       itemId: createId('inbox'),
@@ -1247,6 +1460,22 @@ export async function resolveMakeupApproval(approvalId: string, action: 'approve
       createdAt: now,
       updatedAt: now,
       expireAt: shanghaiNowIso(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+    });
+    database.notifications.push({
+      notificationId: createId('notification'),
+      userId: approval.applicantUserId,
+      type: 'makeup_result',
+      title: action === 'approve' ? '补卡已通过' : '补卡未通过',
+      content: action === 'approve' ? '你的补卡记录已经生效' : '本次补卡申请被拒绝',
+      moduleId: approval.moduleId,
+      targetType: 'record',
+      targetId: approval.recordId,
+      recordDate: approval.targetDate,
+      actionType: 'none',
+      actionStatus: 'none',
+      isRead: false,
+      createdAt: now,
+      updatedAt: now,
     });
     addAudit(database, `makeup_${action}`, approval.moduleId, approvalId);
     return { ...approval };
@@ -1450,14 +1679,13 @@ export interface RecycleModuleView {
   remainingDays: number;
 }
 
-export async function deleteModuleToRecycle(moduleId: string, confirmationName: string): Promise<void> {
+export async function deleteModuleToRecycle(moduleId: string, _confirmationName?: string): Promise<void> {
   await delay(160);
   updateDatabase((database) => {
     const module = database.modules.find((item) => item.moduleId === moduleId);
     if (!module) throw new Error('MODULE_NOT_FOUND');
     const currentMember = findActiveMember(database, module);
     if (currentMember.role !== 'creator') throw new Error('CREATOR_REQUIRED');
-    if (confirmationName.trim() !== module.name) throw new Error('MODULE_NAME_MISMATCH');
     const now = shanghaiNowIso();
     module.status = 'pending_delete';
     module.deletedAt = now;
