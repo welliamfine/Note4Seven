@@ -12,10 +12,13 @@
 .invite-meta > view:first-child { border-right:1rpx solid rgba(110,98,87,.1); }
 .invite-meta > view text:first-child { color:var(--text-color-primary); font-family:var(--font-family-data); font-size:var(--font-size-title); font-weight:var(--font-weight-regular); line-height:var(--line-height-tight); }
 .invite-meta > view text:last-child { color:var(--text-color-muted); font-size:var(--font-size-caption); line-height:var(--line-height-normal); }
-.qr-placeholder { position:relative; width:190rpx; height:190rpx; margin-top:34rpx; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.65); color:var(--text-color-primary); font-family:var(--font-family-data); font-size:var(--font-size-body); font-weight:var(--font-weight-regular); }
-.qr-placeholder > text { font-size:20rpx; }
-.qr-corner { position:absolute; width:42rpx; height:42rpx; border:9rpx solid #655f58; }
-.qr-a { left:14rpx; top:14rpx; }.qr-b { right:14rpx; top:14rpx; }.qr-c { left:14rpx; bottom:14rpx; }
+.invite-code-shell { width:210rpx; height:210rpx; margin-top:34rpx; box-sizing:border-box; display:flex; align-items:center; justify-content:center; overflow:hidden; border:1rpx solid rgba(110,98,87,.1); border-radius:8rpx; background:#fff; }
+.invite-code-image { width:198rpx; height:198rpx; }
+.invite-code-status { width:170rpx; min-height:100rpx; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12rpx; color:var(--text-color-muted); font-size:20rpx; line-height:var(--line-height-normal); }
+.invite-code-status text { width:100%; }
+.invite-code-status text + text { font-size:var(--font-size-caption); }
+.invite-code-spinner { width:30rpx; height:30rpx; box-sizing:border-box; border:4rpx solid rgba(110,98,87,.14); border-top-color:#8f7568; border-radius:50%; animation:invite-code-spin 800ms linear infinite; }
+@keyframes invite-code-spin { to { transform:rotate(360deg); } }
 .invite-actions { width:100%; box-sizing:border-box; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16rpx; }
 .invite-actions .beta-primary,
 .invite-actions .beta-secondary { width:100%; min-width:0; max-width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:center; gap:12rpx; overflow:hidden; line-height:var(--line-height-normal); white-space:nowrap; }

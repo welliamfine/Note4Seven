@@ -5,6 +5,7 @@ export interface MemberAccess extends RowDataPacket {
   module_id: string;
   module_status: string;
   module_mode: 'solo' | 'group';
+  module_record_policy: 'strict' | 'relaxed';
   creator_user_id: string;
   active_member_count: number;
   member_limit: number;
@@ -28,6 +29,7 @@ export async function requireMember(
   const lock = options.lock ? ' FOR UPDATE' : '';
   const [rows] = await database.execute<MemberAccess[]>(
     `SELECT m.module_id, m.status AS module_status, m.mode AS module_mode,
+            m.record_policy AS module_record_policy,
             m.creator_user_id, m.active_member_count, m.member_limit, m.next_join_sequence,
             mm.member_instance_id, mm.user_id, mm.role, mm.join_sequence,
             mm.nickname_snapshot, mm.avatar_file_key_snapshot

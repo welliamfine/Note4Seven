@@ -8,6 +8,8 @@ import { isoWithShanghaiOffset, shanghaiDate } from '../lib/time';
 import { authUser } from '../middleware/auth';
 import { requireMember } from '../services/access';
 import { idempotent, isDuplicateKey } from '../services/idempotency';
+import { canMutateRecord, assertNormalRecordDate } from '../services/record-policy';
+import { invalidateMonthlyMemoryCards, refreshRecordProjections } from '../services/record-projections';
 import type { StorageService } from '../services/storage';
 import type { WechatService } from '../services/wechat';
 
@@ -75,6 +77,7 @@ interface RecordRow extends RowDataPacket {
   created_at: Date;
   updated_at: Date;
   version: number;
+  record_policy: 'strict' | 'relaxed';
   original_file_key: string;
   thumbnail_file_key: string;
   sticker_file_key: string;
@@ -131,15 +134,13 @@ export function recordRoutes(
     const user = authUser(request);
     const moduleId = dbId(request.params.moduleId, 'm');
     const body = parseBody(initializeCheckinBody, request);
-    if (body.recordDate !== shanghaiDate()) {
-      throw new AppError('RECORD_DATE_NOT_ALLOWED', '只能记录今天', 422, { serverDate: shanghaiDate() });
-    }
     await wechat.assertTextAllowed(user.openId, body.remark);
 
     let result: Record<string, unknown>;
     try {
       result = await idempotent(pool, user.userId, 'checkin_media_init', body.clientRequestId, body, async (connection) => {
         const access = await requireMember(connection, moduleId, user.userId, { lock: true });
+        assertNormalRecordDate(access.module_record_policy, body.recordDate);
         const [mediaInsert] = await connection.execute<ResultSetHeader>(
           `INSERT INTO media_asset
              (owner_user_id, module_id, member_instance_id, purpose, source_type, mime_type, file_size,
@@ -176,7 +177,7 @@ export function recordRoutes(
         };
       });
     } catch (error) {
-      if (isDuplicateKey(error)) throw new AppError('RECORD_ALREADY_EXISTS', '今天已经有一条记录', 409, { refreshRequired: true });
+      if (isDuplicateKey(error)) throw new AppError('RECORD_ALREADY_EXISTS', '该日期已经有一条记录', 409, { refreshRequired: true });
       throw error;
     }
     const upload = await storage.createUpload(String(result.objectKey));
@@ -280,9 +281,6 @@ export function recordRoutes(
     const user = authUser(request);
     const moduleId = dbId(request.params.moduleId, 'm');
     const body = parseBody(createBody, request);
-    if (body.recordDate !== shanghaiDate()) {
-      throw new AppError('RECORD_DATE_NOT_ALLOWED', '只能记录今天', 422, { serverDate: shanghaiDate() });
-    }
     await wechat.assertTextAllowed(user.openId, body.remark);
     const mediaId = dbId(body.mediaId, 'media');
 
@@ -290,6 +288,7 @@ export function recordRoutes(
     try {
       result = await idempotent(pool, user.userId, 'record_create', body.clientRequestId, body, async (connection) => {
         const access = await requireMember(connection, moduleId, user.userId, { lock: true });
+        assertNormalRecordDate(access.module_record_policy, body.recordDate);
         await requireReadyMedia(connection, mediaId, user.userId, moduleId, String(access.member_instance_id));
         const now = new Date();
         const [insert] = await connection.execute<ResultSetHeader>(
@@ -313,6 +312,7 @@ export function recordRoutes(
           [moduleId],
         );
         await emit(connection, 'record', recordId, 'record.created', { recordId, moduleId });
+        await refreshRecordProjections(connection, moduleId, body.recordDate);
         return {
           recordId: publicId('r', recordId),
           moduleId: publicId('m', moduleId),
@@ -326,7 +326,7 @@ export function recordRoutes(
         };
       });
     } catch (error) {
-      if (isDuplicateKey(error)) throw new AppError('RECORD_ALREADY_EXISTS', '今天已经有一条记录', 409, { refreshRequired: true });
+      if (isDuplicateKey(error)) throw new AppError('RECORD_ALREADY_EXISTS', '该日期已经有一条记录', 409, { refreshRequired: true });
       throw error;
     }
     ok(response, result, 201);
@@ -349,13 +349,15 @@ export function recordRoutes(
     await wechat.assertTextAllowed(user.openId, body.remark);
     const result = await idempotent(pool, user.userId, 'record_update', body.clientRequestId, body, async (connection) => {
       const [records] = await connection.execute<RecordRow[]>(
-        'SELECT * FROM life_record WHERE record_id = ? FOR UPDATE',
+        `SELECT r.*, m.record_policy FROM life_record r
+          JOIN life_module m ON m.module_id = r.module_id
+         WHERE r.record_id = ? FOR UPDATE`,
         [recordId],
       );
       const record = records[0];
       if (!record) throw new AppError('RECORD_NOT_FOUND', '记录不存在', 404);
       if (String(record.user_id) !== user.userId) throw new AppError('NO_MODULE_PERMISSION', '只能修改自己的记录', 403);
-      if (sqlDate(record.record_date) !== shanghaiDate() || record.status !== 'active') {
+      if (!canMutateRecord(record.record_policy, sqlDate(record.record_date)) || record.status !== 'active') {
         throw new AppError('RECORD_LOCKED', '该记录已经不能修改', 409);
       }
       const access = await requireMember(connection, String(record.module_id), user.userId, { lock: true });
@@ -377,6 +379,7 @@ export function recordRoutes(
         [recordId, revision.next_revision, mediaId, body.remark || null, user.userId],
       );
       await emit(connection, 'record', recordId, 'record.updated', { recordId, moduleId: record.module_id });
+      await invalidateMonthlyMemoryCards(connection, String(record.module_id), sqlDate(record.record_date).slice(0, 7));
       return { recordId: publicId('r', recordId), mediaId: publicId('media', mediaId), remark: body.remark, version: body.version + 1 };
     });
     ok(response, result);
@@ -387,11 +390,16 @@ export function recordRoutes(
     const recordId = dbId(request.params.recordId, 'r');
     const body = parseBody(deleteBody, request);
     const result = await idempotent(pool, user.userId, 'record_delete', body.clientRequestId, body, async (connection) => {
-      const [records] = await connection.execute<RecordRow[]>('SELECT * FROM life_record WHERE record_id = ? FOR UPDATE', [recordId]);
+      const [records] = await connection.execute<RecordRow[]>(
+        `SELECT r.*, m.record_policy FROM life_record r
+          JOIN life_module m ON m.module_id = r.module_id
+         WHERE r.record_id = ? FOR UPDATE`,
+        [recordId],
+      );
       const record = records[0];
       if (!record) throw new AppError('RECORD_NOT_FOUND', '记录不存在', 404);
       if (String(record.user_id) !== user.userId) throw new AppError('NO_MODULE_PERMISSION', '只能删除自己的记录', 403);
-      if (sqlDate(record.record_date) !== shanghaiDate() || record.status !== 'active') {
+      if (!canMutateRecord(record.record_policy, sqlDate(record.record_date)) || record.status !== 'active') {
         throw new AppError('RECORD_LOCKED', '该记录已经不能删除', 409);
       }
       await requireMember(connection, String(record.module_id), user.userId, { lock: true });
@@ -416,6 +424,7 @@ export function recordRoutes(
       );
       await audit(connection, String(record.module_id), user.userId, 'record_delete', 'record', recordId);
       await emit(connection, 'record', recordId, 'record.deleted', { recordId, moduleId: record.module_id });
+      await refreshRecordProjections(connection, String(record.module_id), sqlDate(record.record_date));
       return { recordId: publicId('r', recordId), status: 'deleted' };
     });
     ok(response, result);
@@ -511,14 +520,16 @@ export function recordRoutes(
         ? { recordId: publicId('r', current.record_id) } : null,
       processingCheckin: current?.status === 'pending' && current.source === 'normal'
         ? { recordId: publicId('r', current.record_id) } : null,
-      primaryAction: dateType === 'today'
+      primaryAction: access.module_record_policy === 'relaxed' || dateType === 'today'
         ? current
           ? current.status === 'pending' && current.source === 'normal'
             ? { type: 'resume_processing', label: '查看生成进度', recordId: publicId('r', current.record_id) }
-            : { type: 'edit_today', label: '编辑今日', recordId: publicId('r', current.record_id) }
-          : { type: 'record_today', label: '记录今日' }
+            : { type: 'edit_record', label: '编辑记录', recordId: publicId('r', current.record_id) }
+          : { type: 'record_date', label: '记录这一天' }
         : null,
-      availableActions: dateType === 'future' ? [] : ['view_records'],
+      availableActions: access.module_record_policy === 'relaxed'
+        ? ['view_records', current ? 'edit_record' : 'record_date']
+        : dateType === 'future' ? [] : ['view_records'],
     });
   }));
 
@@ -673,8 +684,9 @@ async function loadMonthRecords(pool: Pool, moduleId: string, month: string): Pr
 }
 
 function recordSelect(where: string): string {
-  return `SELECT r.*, ma.original_file_key, ma.thumbnail_file_key, ma.sticker_file_key, ma.sticker_thumbnail_file_key
-            FROM life_record r JOIN media_asset ma ON ma.media_id = r.media_id ${where}
+  return `SELECT r.*, m.record_policy, ma.original_file_key, ma.thumbnail_file_key, ma.sticker_file_key, ma.sticker_thumbnail_file_key
+            FROM life_record r JOIN life_module m ON m.module_id = r.module_id
+            JOIN media_asset ma ON ma.media_id = r.media_id ${where}
            ORDER BY r.record_date, r.join_sequence_snapshot`;
 }
 
@@ -702,8 +714,10 @@ async function serializeRecord(storage: StorageService, record: RecordRow, curre
     stickerThumbnailUrl,
     firstEffectiveAt: record.first_effective_at ? isoWithShanghaiOffset(record.first_effective_at) : null,
     version: record.version,
-    availableActions: String(record.user_id) === currentUserId && sqlDate(record.record_date) === shanghaiDate() && record.status === 'active'
-      ? ['edit', 'delete']
+    availableActions: String(record.user_id) === currentUserId
+      ? canMutateRecord(record.record_policy, sqlDate(record.record_date)) && record.status === 'active'
+        ? ['edit', 'delete']
+        : []
       : ['react'],
   };
 }

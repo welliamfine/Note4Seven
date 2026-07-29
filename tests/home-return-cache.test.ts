@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { consumeHomePreviewUpdates, queueHomePreviewUpdate } from '../src/services/home-preview-cache';
+import { shanghaiDate } from '../src/utils/date';
 
 const api = vi.hoisted(() => ({
   getHomeModules: vi.fn(),
@@ -271,23 +272,24 @@ describe('home return cache', () => {
       }],
       normal: [],
     };
+    const today = shanghaiDate();
     const records = [1, 2, 3, 4].map((index) => ({
       recordId: `record_${index}`,
       moduleId: 'module_1',
       memberInstanceId: `member_${index}`,
       userId: `user_${index}`,
-      recordDate: '2026-07-28',
+      recordDate: today,
       originalPath: `/${index}.png`,
       stickerPath: `/${index}.png`,
       remark: '',
       source: 'normal' as const,
       status: 'active' as const,
-      firstEffectiveAt: `2026-07-28T00:00:0${index}+08:00`,
-      updatedAt: `2026-07-28T00:00:0${index}+08:00`,
+      firstEffectiveAt: `${today}T00:00:0${index}+08:00`,
+      updatedAt: `${today}T00:00:0${index}+08:00`,
     }));
     api.getHomeModules.mockResolvedValueOnce(initial).mockResolvedValueOnce(incompleteRemote);
     api.getCalendar.mockResolvedValueOnce([{
-      date: '2026-07-28', day: 28, inMonth: true, isToday: true, isFuture: false,
+      date: today, day: Number(today.slice(8, 10)), inMonth: true, isToday: true, isFuture: false,
       hasRecords: true, records,
     }]);
     api.getCurrentUser.mockResolvedValueOnce({ userId: 'user_1' });

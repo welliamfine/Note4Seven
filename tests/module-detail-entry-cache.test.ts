@@ -6,7 +6,15 @@ const api = vi.hoisted(() => ({
   getCalendar: vi.fn(),
   refreshModule: vi.fn(),
   saveRecord: vi.fn(),
+  getCurrentMakeupApproval: vi.fn(),
+  getDateRecords: vi.fn(),
+  getRecordReactions: vi.fn(),
   getModuleMonthSummary: vi.fn(() => ({
+    currentUserRecordedDays: 4,
+    jointCompletedDays: 2,
+    receivedReactionCount: 3,
+  })),
+  refreshModuleMonthSummary: vi.fn(async () => ({
     currentUserRecordedDays: 4,
     jointCompletedDays: 2,
     receivedReactionCount: 3,
@@ -27,10 +35,10 @@ vi.mock('../src/services/api', () => ({
   deleteRecord: vi.fn(),
   discardPrewarmedMediaUpload: vi.fn(),
   getCheckinProcessingStatus: vi.fn(),
-  getCurrentMakeupApproval: vi.fn(),
-  getDateRecords: vi.fn(),
+  getCurrentMakeupApproval: api.getCurrentMakeupApproval,
+  getDateRecords: api.getDateRecords,
   getReactionOptions: vi.fn(() => []),
-  getRecordReactions: vi.fn(),
+  getRecordReactions: api.getRecordReactions,
   prewarmMediaUpload: vi.fn(),
   processMedia: vi.fn(),
   refreshMediaStickerSources: vi.fn(),
@@ -71,6 +79,8 @@ const createPage = () => ({
   onHide: () => void;
   onUnload: () => void;
   submitRecord: () => Promise<void>;
+  openDateValue: (recordDate: string) => Promise<void>;
+  openEditor: (record?: Record<string, unknown>, recordDate?: string, forceMakeup?: boolean) => void;
 };
 
 describe('module detail entry cache', () => {
@@ -81,6 +91,9 @@ describe('module detail entry cache', () => {
     api.getCalendar.mockReset();
     api.refreshModule.mockReset();
     api.saveRecord.mockReset();
+    api.getCurrentMakeupApproval.mockReset();
+    api.getDateRecords.mockReset();
+    api.getRecordReactions.mockReset();
     homePreview.queueHomePreviewUpdate.mockClear();
     vi.stubGlobal('wx', {
       getWindowInfo: () => ({ statusBarHeight: 24 }),
@@ -89,6 +102,32 @@ describe('module detail entry cache', () => {
     });
     vi.stubGlobal('Page', (definition: PageDefinition) => { pageDefinition = definition; });
     await import('../src/subpackages/module-detail/index');
+  });
+
+  it('uses direct create and edit actions for relaxed historical and future dates', async () => {
+    const page = createPage();
+    const member = {
+      memberInstanceId: 'member_relaxed', userId: 'user_1', nickname: 'Seven', avatarText: 'S',
+      avatarColor: '#eee', role: 'creator', joinSequence: 1, joinedAt: '2026-07-01T00:00:00+08:00', active: true,
+    };
+    page.data.module = {
+      moduleId: 'module_relaxed', name: '随手记录', description: '', mode: 'solo', recordPolicy: 'relaxed',
+      status: 'active', creatorUserId: 'user_1', createdAt: '2026-07-01T00:00:00+08:00',
+      updatedAt: '2026-07-01T00:00:00+08:00', version: 1, members: [member],
+    };
+    page.data.moduleId = 'module_relaxed';
+    page.data.currentUser = { userId: 'user_1', nickname: 'Seven', avatarText: 'S', avatarColor: '#eee' };
+    api.getDateRecords.mockResolvedValueOnce([]);
+
+    await page.openDateValue('2099-12-31');
+
+    expect(api.getCurrentMakeupApproval).not.toHaveBeenCalled();
+    expect(page.data.dateAction).toBe('record_date');
+    expect(page.data.dateActionText).toBe('记录这一天');
+    expect(page.data.dateMessage).toContain('当天纳入统计');
+    page.openEditor(undefined, '2099-12-31');
+    expect(page.data.editorMode).toBe('create');
+    expect(page.data.editorTitle).toContain('12月31日');
   });
 
   afterEach(() => {

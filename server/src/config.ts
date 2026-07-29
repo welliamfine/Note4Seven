@@ -47,6 +47,7 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(2592000).default(7200),
   WECHAT_OPEN_API_BASE: z.string().url().default('http://api.weixin.qq.com'),
+  MINI_PROGRAM_CODE_ENV_VERSION: z.enum(['develop', 'trial', 'release']).default('trial'),
   PRIVACY_VERSION: z.string().min(1).default('1.0.0'),
   WECHAT_CALLBACK_TOKEN: z.preprocess((value) => value === '' ? undefined : value, z.string().min(16).optional()),
   WECHAT_CALLBACK_TOKEN_PREVIOUS: z.preprocess((value) => value === '' ? undefined : value, z.string().min(16).optional()),
@@ -90,6 +91,7 @@ export type AppConfig = {
   logLevel: string;
   sessionTtlSeconds: number;
   wechatOpenApiBase: string;
+  miniProgramCodeEnvVersion: 'develop' | 'trial' | 'release';
   privacyVersion: string;
   wechatCallbackToken: string | null;
   wechatCallbackTokenPrevious: string | null;
@@ -186,6 +188,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     logLevel: env.LOG_LEVEL,
     sessionTtlSeconds: env.SESSION_TTL_SECONDS,
     wechatOpenApiBase: env.WECHAT_OPEN_API_BASE,
+    miniProgramCodeEnvVersion: env.MINI_PROGRAM_CODE_ENV_VERSION,
     privacyVersion: env.PRIVACY_VERSION,
     wechatCallbackToken: env.WECHAT_CALLBACK_TOKEN ?? null,
     wechatCallbackTokenPrevious: env.WECHAT_CALLBACK_TOKEN_PREVIOUS ?? null,

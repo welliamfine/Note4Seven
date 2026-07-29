@@ -19,6 +19,11 @@ const checks = [
       )`,
   },
   {
+    name: 'module_record_policy_domain',
+    sql: `SELECT COUNT(*) AS violations FROM life_module
+      WHERE record_policy NOT IN ('strict','relaxed')`,
+  },
+  {
     name: 'media_status_domain',
     sql: `SELECT COUNT(*) AS violations FROM media_asset
       WHERE status NOT IN ('created','uploading','uploaded','processing','ready','failed','abandoned')

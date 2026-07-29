@@ -4,7 +4,7 @@
   <scroll-view class="beta-scroll content-layer" scroll-y enhanced show-scrollbar="{{false}}"><view class="beta-body todo-body">
     <view wx:if="{{loading}}" class="beta-loading">正在加载...</view><view wx:elif="{{!items.length}}" class="beta-empty beta-glass">暂时没有待办</view>
     <view wx:else class="todo-list">
-      <view class="todo-card beta-glass" wx:for="{{items}}" wx:key="itemId" data-id="{{item.itemId}}" bindtap="markRead">
+      <view class="todo-card beta-glass" wx:for="{{items}}" wx:key="itemId">
         <view class="todo-head"><text class="todo-type">{{item.title}}</text><text wx:if="{{item.status === 'unread'}}" class="todo-dot"></text></view>
         <text class="todo-content">{{item.content}}</text>
         <view wx:if="{{item.stickerPath}}" class="todo-sticker"><image class="sticker-outline-small" src="{{item.stickerPath}}" mode="aspectFit" webp /></view>
@@ -17,8 +17,6 @@
           <button data-approval="{{item.approval.approvalId}}" data-action="reject" disabled="{{item.isProcessing}}" catchtap="resolveMakeup">拒绝</button>
           <button class="approve" data-approval="{{item.approval.approvalId}}" data-action="approve" disabled="{{item.isProcessing}}" catchtap="resolveMakeup">同意</button>
         </view>
-        <text wx:elif="{{item.application}}" class="todo-result">{{item.application.status === 'approved' ? '已通过' : item.application.status === 'rejected' ? '已拒绝' : '已处理'}}</text>
-        <text wx:elif="{{item.approval}}" class="todo-result">{{item.approval.status === 'approved' ? '已通过' : item.approval.status === 'rejected' ? '已拒绝' : '已处理'}}</text>
       </view>
     </view>
   </view></scroll-view>

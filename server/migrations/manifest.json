@@ -41,6 +41,14 @@
     {
       "file": "010_member_departure_notifications.sql",
       "sha256": "083d9382e61f918d1b21d2db730e8a33e412627cecd7658af1a7ffd1503f906a"
+    },
+    {
+      "file": "011_notification_state_sync.sql",
+      "sha256": "6cee7b95380f5d02b725e928f78fa7152bbe601665f14205948563d5b67eeba3"
+    },
+    {
+      "file": "012_module_record_policy.sql",
+      "sha256": "5f8f30826d73226dfe50eae276fd64461fe9fc63d0f8d3e13dfede4d54b54757"
     }
   ]
 }

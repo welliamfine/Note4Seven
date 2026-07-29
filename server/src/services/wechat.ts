@@ -108,7 +108,13 @@ export class WechatService {
       response = await fetch(await this.openApiUrl('/wxa/getwxacodeunlimit'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ scene, page, check_path: false, env_version: 'release', width: 430 }),
+        body: JSON.stringify({
+          scene,
+          page,
+          check_path: false,
+          env_version: this.config.miniProgramCodeEnvVersion,
+          width: 430,
+        }),
         signal: AbortSignal.timeout(15_000),
       });
     } catch {

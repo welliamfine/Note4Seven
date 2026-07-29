@@ -1130,6 +1130,16 @@
         "summary": "POST /api/v1/modules",
         "x-source": "src/routes/modules.ts",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModuleCreateRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -1797,6 +1807,50 @@
           },
           {
             "name": "memberInstanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/modules/{moduleId}/month-summary": {
+      "get": {
+        "operationId": "get_api_v1_modules_moduleId_month_summary",
+        "tags": [
+          "v1"
+        ],
+        "summary": "GET /api/v1/modules/{moduleId}/month-summary",
+        "x-source": "src/routes/views.ts",
+        "parameters": [
+          {
+            "name": "moduleId",
             "in": "path",
             "required": true,
             "schema": {
@@ -3159,6 +3213,44 @@
           "wxCode": {
             "type": "string",
             "maxLength": 256
+          },
+          "clientRequestId": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 64
+          }
+        }
+      },
+      "ModuleCreateRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "recordPolicy",
+          "clientRequestId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200,
+            "default": ""
+          },
+          "recordPolicy": {
+            "type": "string",
+            "enum": [
+              "strict",
+              "relaxed"
+            ],
+            "description": "Immutable after module creation."
+          },
+          "templateId": {
+            "type": "string",
+            "maxLength": 64
           },
           "clientRequestId": {
             "type": "string",

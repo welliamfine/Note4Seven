@@ -743,16 +743,21 @@ page {
 }
 
 .group-calendar.duo-calendar .slot-top-center {
-  left: 25%;
-  top: 25%;
-  transform: translate(-50%, -50%) rotate(-5deg);
+  left: 31%;
+  top: 29%;
+  width: 54rpx;
+  height: 62rpx;
+  transform: translate(-50%, -50%) rotate(-3deg);
 }
 
 .group-calendar.duo-calendar .slot-bottom-center {
-  left: 75%;
-  top: 75%;
+  left: 74%;
+  top: 71%;
   bottom: auto;
-  transform: translate(-50%, -50%) rotate(5deg);
+  z-index: 1;
+  width: 54rpx;
+  height: 62rpx;
+  transform: translate(-50%, -50%) rotate(6deg);
 }
 
 .group-calendar .slot-top-left {

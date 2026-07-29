@@ -19,6 +19,7 @@ import {
   getRecordReactions,
   processMedia,
   prewarmMediaUpload,
+  refreshModuleMonthSummary,
   refreshMediaStickerSources,
   retryCheckinMatting,
   saveRecord,
@@ -45,6 +46,11 @@ import { waitForSheetMotion } from '../../utils/sheet-motion';
 import { STICKER_MOTION, waitForAppRouteDone } from '../../utils/sticker-motion';
 import { preloadImageSources } from '../../utils/image-preload';
 import { mergeMemberSnapshot } from '../../utils/member-sync';
+import {
+  isRecordDateInRange,
+  RECORD_DATE_MAX,
+  RECORD_DATE_MIN,
+} from '../../utils/record-policy';
 import {
   buildMemberCalendarPages,
   createCalendarStickerPlan,
@@ -192,6 +198,8 @@ Page({
     currentUser: null as User | null,
     today: shanghaiDate(),
     month: monthOf(shanghaiDate()),
+    recordDateMin: RECORD_DATE_MIN,
+    recordDateMax: RECORD_DATE_MAX,
     currentMonthLabel: monthLabel(monthOf(shanghaiDate())),
     calendar: [] as AnimatedCalendarCell[],
     memberCalendars: [] as MemberCalendarPage[],
@@ -262,16 +270,20 @@ Page({
       void wx.navigateBack();
       return;
     }
+    const requestedDate = query.date && isRecordDateInRange(query.date) ? query.date : '';
+    const initialMonth = requestedDate ? requestedDate.slice(0, 7) : this.data.month;
     this.setData({
       moduleId: query.moduleId,
+      month: initialMonth,
+      currentMonthLabel: monthLabel(initialMonth),
       statusBarHeight: wx.getWindowInfo?.().statusBarHeight ?? 24,
     });
-    const cached = moduleDetailCache.get(moduleDetailCacheKey(query.moduleId, this.data.month));
+    const cached = moduleDetailCache.get(moduleDetailCacheKey(query.moduleId, initialMonth));
     const initialLoad = cached
       ? this.loadAll(false, true, cached)
       : this.loadAll(true, true);
     void initialLoad.then(() => {
-      if (query.date && this.data.module) void this.openDateValue(query.date);
+      if (requestedDate && this.data.module) void this.openDateValue(requestedDate);
       if (cached && calendarPageVisible) void this.syncCalendarInBackground();
     });
   },
@@ -322,6 +334,7 @@ Page({
             getModule(this.data.moduleId),
             getCurrentUser(),
             getCalendar(this.data.moduleId, this.data.month),
+            refreshModuleMonthSummary(this.data.moduleId, this.data.month),
           ]);
       if (!cached) await inboxReady;
       moduleDetailCache.set(moduleDetailCacheKey(this.data.moduleId, this.data.month), {
@@ -514,9 +527,11 @@ Page({
       })),
     }));
     const plan = mergeCalendarSnapshot(this.data.calendar, normalizedSnapshot);
+    const summaryPromise = refreshModuleMonthSummary(module.moduleId, this.data.month);
     await Promise.all([
       preloadImageSources([...plan.animatedStickerSources, ...memberPlan.avatarSources]),
       beforeApply,
+      summaryPromise,
     ]);
     if (generation !== calendarSyncGeneration || module.moduleId !== this.data.moduleId) return false;
     moduleDetailCache.set(moduleDetailCacheKey(module.moduleId, this.data.month), {
@@ -524,7 +539,11 @@ Page({
       currentUser,
       calendar: normalizedSnapshot,
     });
-    if (!plan.changedCellIndexes.length && !memberPlan.changed) return false;
+    const summary = await summaryPromise;
+    const summaryChanged = summary.currentUserRecordedDays !== this.data.monthRecordCount
+      || summary.jointCompletedDays !== this.data.jointCompletedDays
+      || summary.receivedReactionCount !== this.data.receivedReactionCount;
+    if (!plan.changedCellIndexes.length && !memberPlan.changed && !summaryChanged) return false;
     this.finishFreshCalendarStickerAnimation();
     const patch: Record<string, unknown> = {};
     plan.changedCellIndexes.forEach((cellIndex) => {
@@ -579,9 +598,9 @@ Page({
     }
     const monthCells = plan.calendar.filter((cell) => cell.inMonth);
     const monthRecords = monthCells.flatMap((cell) => cell.records);
-    patch.monthRecordCount = monthCells.filter((cell) => cell.records.some((record) => record.userId === currentUser.userId)).length;
-    patch.jointCompletedDays = monthCells.filter((cell) => syncedModule.members.length > 0
-      && syncedModule.members.every((member) => cell.records.some((record) => record.memberInstanceId === member.memberInstanceId))).length;
+    patch.monthRecordCount = summary.currentUserRecordedDays;
+    patch.jointCompletedDays = summary.jointCompletedDays;
+    patch.receivedReactionCount = summary.receivedReactionCount;
     patch.streakDays = this.calculateStreak(plan.calendar, currentUser.userId);
     patch.galleryHasSticker = monthRecords.length > 0;
     patch.galleryCover = monthRecords[monthRecords.length - 1]?.stickerPath ?? '/assets/stickers/group-3.png';
@@ -719,11 +738,21 @@ Page({
   },
 
   previousMonth() {
-    void this.changeMonth(previousMonth(this.data.month), 'previous');
+    const target = previousMonth(this.data.month);
+    if (target < RECORD_DATE_MIN.slice(0, 7)) return;
+    void this.changeMonth(target, 'previous');
   },
 
   nextMonth() {
-    void this.changeMonth(nextMonth(this.data.month), 'next');
+    const target = nextMonth(this.data.month);
+    if (target > RECORD_DATE_MAX.slice(0, 7)) return;
+    void this.changeMonth(target, 'next');
+  },
+
+  onCalendarMonthPick(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    const target = event.detail.value.slice(0, 7);
+    if (target === this.data.month || target < RECORD_DATE_MIN.slice(0, 7) || target > RECORD_DATE_MAX.slice(0, 7)) return;
+    void this.changeMonth(target, target > this.data.month ? 'next' : 'previous');
   },
 
   async changeMonth(targetMonth: string, direction: 'previous' | 'next') {
@@ -765,6 +794,7 @@ Page({
       todoBadgePhase: todoChanged && this.data.todoCount ? 'badge-leaving' : this.data.todoBadgePhase,
     });
     const calendarPromise = getCalendar(this.data.moduleId, targetMonth);
+    const summaryPromise = refreshModuleMonthSummary(this.data.moduleId, targetMonth);
 
     try {
       await waitForStickerTimeline(STICKER_MOTION.oldPageFadeDuration);
@@ -778,7 +808,7 @@ Page({
         statsNumberClass: numberExitClass,
       });
 
-      const [calendar] = await Promise.all([calendarPromise, exitMotion]);
+      const [calendar] = await Promise.all([calendarPromise, exitMotion, summaryPromise]);
       if (token !== monthTransitionToken) return;
       const presentation = this.buildMonthPresentation(calendar, module, currentUser, targetMonth);
       moduleDetailCache.set(moduleDetailCacheKey(module.moduleId, targetMonth), {
@@ -921,12 +951,18 @@ Page({
   },
 
   async openDateValue(recordDate: string) {
+    if (!isRecordDateInRange(recordDate)) {
+      wx.showToast({ title: '日期需在 1900 至 2099 年之间', icon: 'none' });
+      return;
+    }
     const records = await getDateRecords(this.data.moduleId, recordDate);
-    const pendingMakeup = await getCurrentMakeupApproval(this.data.moduleId, recordDate);
-    const reactions = await Promise.all(records.map((record) => getRecordReactions(record.recordId)));
     const module = this.data.module;
     const user = this.data.currentUser;
     if (!module || !user) return;
+    const pendingMakeup = module.recordPolicy === 'strict'
+      ? await getCurrentMakeupApproval(this.data.moduleId, recordDate)
+      : undefined;
+    const reactions = await Promise.all(records.map((record) => getRecordReactions(record.recordId)));
     const views = records.map<RecordView>((record, index) => {
       const member = module.members.find((item) => item.memberInstanceId === record.memberInstanceId);
       return {
@@ -945,7 +981,11 @@ Page({
     let dateAction = 'none';
     let dateActionText = '';
     let dateMessage = '';
-    if (offset === 0) {
+    if (module.recordPolicy === 'relaxed') {
+      dateAction = mine ? 'edit_record' : 'record_date';
+      dateActionText = mine ? '编辑记录' : '记录这一天';
+      dateMessage = offset > 0 ? '记录会立即显示，并在当天纳入统计' : '保存后直接生效，无需审批';
+    } else if (offset === 0) {
       dateAction = mine ? 'edit_today' : 'record_today';
       dateActionText = mine ? '编辑今日' : '记录今日';
     } else if (offset >= -3 && offset < 0 && pendingMakeup) {
@@ -994,8 +1034,12 @@ Page({
 
   async onDatePrimaryAction() {
     const record = this.data.dateRecords.find((item) => item.isMine);
+    const isMakeup = this.data.dateAction === 'makeup';
+    const targetDate = isMakeup || this.data.module?.recordPolicy === 'relaxed'
+      ? this.data.selectedDate
+      : this.data.today;
     await this.dismissDateSheet();
-    this.openEditor(record, this.data.dateAction === 'makeup' ? this.data.selectedDate : this.data.today);
+    this.openEditor(record, targetDate, isMakeup);
   },
 
   openTodayEditor() {
@@ -1022,17 +1066,18 @@ Page({
     void this.pollProcessingCheckin(checkinId, token);
   },
 
-  openEditor(record?: LifeRecord, recordDate?: string) {
+  openEditor(record?: LifeRecord, recordDate?: string, forceMakeup = false) {
     const targetDate = recordDate ?? this.data.today;
     const isEdit = Boolean(record);
-    const isMakeup = targetDate !== this.data.today;
+    const isMakeup = forceMakeup;
+    const targetLabel = dateLabel(targetDate);
     invalidateEditorMediaTask();
     clearEditorStickerTimers();
     this.setData({
       editorOpen: true,
       editorClosing: false,
       editorMode: isMakeup ? 'makeup' : (isEdit ? 'edit' : 'create'),
-      editorTitle: isMakeup ? '申请补卡' : (isEdit ? '编辑今天' : '记录今天'),
+      editorTitle: isMakeup ? '申请补卡' : (isEdit ? `编辑 ${targetLabel}` : `记录 ${targetLabel}`),
       editorRecordId: record?.recordId ?? '',
       editorDate: targetDate,
       editorOriginalPath: record?.originalPath ?? '',
@@ -1434,7 +1479,7 @@ Page({
       wx.showToast({
         title: makeupResult
           ? (makeupResult.approval ? '补卡申请已提交' : '补卡已生效')
-          : (this.data.editorMode === 'edit' ? '今天已更新' : '今天已记录'),
+          : (this.data.editorMode === 'edit' ? '记录已更新' : '记录已保存'),
       });
     } catch (error) {
       this.setData({ saving: false });
@@ -1469,14 +1514,16 @@ Page({
     const moduleId = this.data.moduleId;
     const editorMonth = this.data.editorDate.slice(0, 7);
     wx.showModal({
-      title: '删除今天的记录？',
+      title: '删除这条记录？',
       content: '贴纸会从首页和日历移除，之后仍可重新记录。',
       confirmText: '删除',
       confirmColor: '#F65451',
       success: async ({ confirm }) => {
         if (!confirm) return;
         await deleteRecord(recordId);
-        void queueHomePreviewUpdate({ type: 'remove', moduleId, recordId });
+        if (this.data.editorDate === this.data.today) {
+          void queueHomePreviewUpdate({ type: 'remove', moduleId, recordId });
+        }
         await this.dismissEditor();
         invalidateModuleGallery(moduleId, editorMonth);
         await this.applyCalendarSnapshot(this.calendarSnapshotWithoutRecord(recordId));

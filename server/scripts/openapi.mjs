@@ -100,6 +100,16 @@ const document = {
         type: 'object', required: ['clientRequestId'], additionalProperties: false,
         properties: { wxCode: { type: 'string', maxLength: 256 }, clientRequestId: { type: 'string', minLength: 8, maxLength: 64 } },
       },
+      ModuleCreateRequest: {
+        type: 'object', required: ['name', 'recordPolicy', 'clientRequestId'], additionalProperties: false,
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 10 },
+          description: { type: 'string', maxLength: 200, default: '' },
+          recordPolicy: { type: 'string', enum: ['strict', 'relaxed'], description: 'Immutable after module creation.' },
+          templateId: { type: 'string', maxLength: 64 },
+          clientRequestId: { type: 'string', minLength: 8, maxLength: 64 },
+        },
+      },
       MediaReservationRequest: {
         type: 'object', required: ['clientRequestId', 'fileSize'], additionalProperties: true,
         properties: { clientRequestId: { type: 'string', minLength: 8, maxLength: 64 }, fileSize: { type: 'integer', minimum: 1, maximum: 10485760 } },
@@ -141,6 +151,7 @@ function tagFor(path) {
 
 function requestSchema(route) {
   if (route.method === 'post' && route.path === '/api/v1/auth/wechat/login') return 'LoginRequest';
+  if (route.method === 'post' && route.path === '/api/v1/modules') return 'ModuleCreateRequest';
   if (route.method === 'post' && route.path === '/api/v1/media/reservations') return 'MediaReservationRequest';
   if (route.method === 'post' && route.path === '/internal/storage/object-created') return 'StorageObjectCreatedRequest';
   return null;

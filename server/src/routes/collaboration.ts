@@ -92,7 +92,7 @@ export function collaborationRoutes(pool: Pool, storage: StorageService): Router
       return {
         inviteId: publicInviteId,
         expireAt: isoWithShanghaiOffset(expireAt),
-        sharePath: `/pages/invite-intro/index?inviteId=${encodeURIComponent(publicInviteId)}`,
+        sharePath: `/subpackages/invite-intro/index?inviteId=${encodeURIComponent(publicInviteId)}`,
         miniProgramCodeUrl: null,
         codeStatus: 'processing',
       };
@@ -393,10 +393,17 @@ function resolveJoin(pool: Pool, action: 'approve' | 'reject') {
       );
       await connection.execute(
         `UPDATE notification
-            SET action_status = 'resolved', is_read = 1,
-                read_at = COALESCE(read_at, UTC_TIMESTAMP(3)), updated_at = UTC_TIMESTAMP(3)
+            SET type = 'join_result', title = ?, content = ?,
+                action_type = 'none', action_status = 'none',
+                is_read = IF(user_id = ?, 1, 0),
+                read_at = IF(user_id = ?, COALESCE(read_at, UTC_TIMESTAMP(3)), NULL),
+                updated_at = UTC_TIMESTAMP(3)
           WHERE target_type = 'join_application' AND target_id = ?`,
-        [applicationId],
+        [action === 'approve' ? '成员已加入' : '加入申请未通过',
+          action === 'approve'
+            ? `「${application.applicant_name_snapshot}」已加入模块`
+            : `「${application.applicant_name_snapshot}」的加入申请已被拒绝`,
+          user.userId, user.userId, applicationId],
       );
       await connection.execute(
         `UPDATE module_inbox_item
@@ -419,9 +426,9 @@ function resolveJoin(pool: Pool, action: 'approve' | 'reject') {
            SELECT ?, user_id, 'member_change', '成员已加入', ?, 'member', ?,
                   'unread', ?, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 30 DAY)
              FROM module_member
-            WHERE module_id = ? AND status = 'active' AND user_id <> ? AND user_id <> ?`,
+            WHERE module_id = ? AND status = 'active' AND user_id <> ?`,
           [application.module_id, joinContent, memberId, dedupeKey, application.module_id,
-            user.userId, application.applicant_user_id],
+            user.userId],
         );
         await connection.execute(
           `INSERT IGNORE INTO notification
@@ -430,9 +437,9 @@ function resolveJoin(pool: Pool, action: 'approve' | 'reject') {
            SELECT user_id, 'member_change', '成员已加入', ?, ?, 'member', ?,
                   'none', 'none', ?
              FROM module_member
-            WHERE module_id = ? AND status = 'active' AND user_id <> ? AND user_id <> ?`,
+            WHERE module_id = ? AND status = 'active' AND user_id <> ?`,
           [joinContent, application.module_id, memberId, dedupeKey, application.module_id,
-            user.userId, application.applicant_user_id],
+            user.userId],
         );
       }
       await connection.execute(
