@@ -1,11 +1,14 @@
 import type { InvitePreview } from '../../services/api';
-import { createModuleInvite } from '../../services/api';
+import { createModuleInvite, getInvitePreview } from '../../services/api';
 import { track } from '../../services/tracker';
 
 let countdownTimer: ReturnType<typeof setInterval> | undefined;
+let inviteCodePollTimer: ReturnType<typeof setTimeout> | undefined;
 
 const INVITE_CARD_WIDTH = 750;
 const INVITE_CARD_HEIGHT = 1000;
+const INVITE_CODE_POLL_INTERVAL_MS = 1500;
+const INVITE_CODE_POLL_ATTEMPTS = 24;
 
 const compactText = (value: string, maximumLength: number): string => (
   value.length > maximumLength ? `${value.slice(0, maximumLength)}...` : value
@@ -36,6 +39,7 @@ const drawInviteCard = (
   context: WechatMiniprogram.CanvasContext,
   preview: InvitePreview,
   countdown: string,
+  inviteCodePath: string,
 ) => {
   context.setFillStyle('#f9f8f3');
   context.fillRect(0, 0, INVITE_CARD_WIDTH, INVITE_CARD_HEIGHT);
@@ -90,16 +94,9 @@ const drawInviteCard = (
   context.fillText('剩余有效时间', 510, 488);
 
   drawRoundedRect(context, 265, 542, 220, 220, 24);
-  context.setFillStyle('#f5f1ea');
+  context.setFillStyle('#ffffff');
   context.fill();
-  context.setStrokeStyle('#655f58');
-  context.setLineWidth(10);
-  [[290, 567], [414, 567], [290, 691]].forEach(([x, y]) => {
-    context.strokeRect(x, y, 46, 46);
-  });
-  context.setFillStyle('#92857b');
-  context.setFontSize(28);
-  context.fillText('Note4Seven', 375, 674);
+  context.drawImage(inviteCodePath, 275, 552, 200, 200);
 
   context.setFillStyle('#6d655e');
   context.setFontSize(22);
@@ -121,22 +118,74 @@ const countdownLabel = (expireAt: string): string => {
 };
 
 Page({
-  data: { statusBarHeight: 24, moduleId: '', loading: true, preview: null as InvitePreview | null, countdown: '24:00:00', expired: false, saving: false },
+  data: {
+    statusBarHeight: 24,
+    moduleId: '',
+    loading: true,
+    preview: null as InvitePreview | null,
+    countdown: '24:00:00',
+    expired: false,
+    saving: false,
+    codeReady: false,
+    codeFailed: false,
+    codeWaitTimedOut: false,
+  },
   onLoad(query: Record<string, string | undefined>) {
     this.setData({ moduleId: query.moduleId ?? '', statusBarHeight: wx.getWindowInfo?.().statusBarHeight ?? 24 });
     void this.load();
   },
-  onUnload() { if (countdownTimer) clearInterval(countdownTimer); },
+  onUnload() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    if (inviteCodePollTimer) clearTimeout(inviteCodePollTimer);
+  },
   async load() {
     try {
       const preview = await createModuleInvite(this.data.moduleId);
-      this.setData({ preview, loading: false });
+      this.setData({
+        preview,
+        loading: false,
+        codeReady: Boolean(preview.codeUrl),
+        codeFailed: false,
+        codeWaitTimedOut: false,
+      });
       this.updateCountdown();
       countdownTimer = setInterval(() => this.updateCountdown(), 1000);
+      if (!preview.codeUrl) {
+        this.scheduleInviteCodePoll(preview.invite.inviteId, INVITE_CODE_POLL_ATTEMPTS);
+      }
       track('invite_share_view', { moduleId: this.data.moduleId, inviteId: preview.invite.inviteId });
     } catch (error) {
       this.setData({ loading: false });
       wx.showToast({ title: error instanceof Error && error.message === 'MODULE_FULL' ? '当前成员已满' : '邀请生成失败', icon: 'none' });
+    }
+  },
+  scheduleInviteCodePoll(inviteId: string, attemptsRemaining: number) {
+    if (attemptsRemaining <= 0) {
+      this.setData({ codeFailed: true, codeWaitTimedOut: true });
+      return;
+    }
+    inviteCodePollTimer = setTimeout(() => {
+      void this.refreshInviteCode(inviteId, attemptsRemaining - 1);
+    }, INVITE_CODE_POLL_INTERVAL_MS);
+  },
+  async refreshInviteCode(inviteId: string, attemptsRemaining: number) {
+    try {
+      const preview = await getInvitePreview(inviteId);
+      if (this.data.preview?.invite.inviteId !== inviteId) return;
+      const codeReady = Boolean(preview.codeUrl);
+      this.setData({
+        preview,
+        codeReady,
+        codeFailed: false,
+        codeWaitTimedOut: false,
+      });
+      if (!codeReady) {
+        this.scheduleInviteCodePoll(inviteId, attemptsRemaining);
+      }
+    } catch {
+      if (this.data.preview?.invite.inviteId === inviteId) {
+        this.scheduleInviteCodePoll(inviteId, attemptsRemaining);
+      }
     }
   },
   updateCountdown() {
@@ -148,13 +197,29 @@ Page({
   },
   goBack() { void wx.navigateBack(); },
   shareTap() { track('invite_share_click', { moduleId: this.data.moduleId, inviteId: this.data.preview?.invite.inviteId }); },
+  previewInviteCode() {
+    const url = this.data.preview?.codeUrl;
+    if (!url) return;
+    wx.previewImage({ current: url, urls: [url] });
+  },
   saveInviteCard() {
     const preview = this.data.preview;
-    if (!preview || this.data.expired || this.data.saving) return;
+    const inviteCodeUrl = preview?.codeUrl;
+    if (!preview || !inviteCodeUrl || this.data.expired || this.data.saving) {
+      if (preview && !inviteCodeUrl) wx.showToast({ title: '体验码还在生成', icon: 'none' });
+      return;
+    }
     this.setData({ saving: true });
     wx.showLoading({ title: '正在生成卡片' });
+    wx.getImageInfo({
+      src: inviteCodeUrl,
+      success: ({ path }) => this.renderInviteCard(preview, path),
+      fail: ({ errMsg }) => this.handleCardSaveFailure(errMsg),
+    });
+  },
+  renderInviteCard(preview: InvitePreview, inviteCodePath: string) {
     const context = wx.createCanvasContext('inviteExportCanvas', this);
-    drawInviteCard(context, preview, this.data.countdown);
+    drawInviteCard(context, preview, this.data.countdown, inviteCodePath);
     context.draw(false, () => {
       wx.canvasToTempFilePath({
         canvasId: 'inviteExportCanvas',

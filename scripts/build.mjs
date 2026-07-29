@@ -125,6 +125,7 @@ const sharedOptions = {
   format: 'cjs',
   target: 'es2020',
   sourcemap: apiMode !== 'remote',
+  minifyWhitespace: targetEnvironment !== 'development',
   logLevel: 'info',
   define: {
     __API_MODE__: JSON.stringify(apiMode),

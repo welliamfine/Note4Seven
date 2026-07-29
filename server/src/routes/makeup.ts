@@ -4,10 +4,12 @@ import { z } from 'zod';
 import { AppError } from '../lib/errors';
 import { asyncRoute, ok, parseBody } from '../lib/http';
 import { publicId } from '../lib/ids';
-import { addHours, daysBetweenShanghai, isoWithShanghaiOffset } from '../lib/time';
+import { addHours, isoWithShanghaiOffset } from '../lib/time';
 import { authUser } from '../middleware/auth';
 import { requireMember } from '../services/access';
 import { idempotent, isDuplicateKey } from '../services/idempotency';
+import { assertMakeupRecordDate } from '../services/record-policy';
+import { refreshRecordProjections } from '../services/record-projections';
 import type { WechatService } from '../services/wechat';
 
 const createBody = z.object({
@@ -42,8 +44,6 @@ export function makeupRoutes(pool: Pool, wechat: WechatService): Router {
     const user = authUser(request);
     const moduleId = dbId(request.params.moduleId, 'm');
     const body = parseBody(createBody, request);
-    const distance = daysBetweenShanghai(body.recordDate);
-    if (distance < 1 || distance > 3) throw new AppError('MAKEUP_DATE_EXPIRED', '只能补记过去三天', 422);
     await wechat.assertTextAllowed(user.openId, body.remark);
     const mediaId = dbId(body.mediaId, 'media');
 
@@ -51,6 +51,7 @@ export function makeupRoutes(pool: Pool, wechat: WechatService): Router {
     try {
       result = await idempotent(pool, user.userId, 'makeup_create', body.clientRequestId, body, async (connection) => {
         const access = await requireMember(connection, moduleId, user.userId, { lock: true });
+        assertMakeupRecordDate(access.module_record_policy, body.recordDate);
         const [media] = await connection.execute<RowDataPacket[]>(
           `SELECT media_id FROM media_asset
             WHERE media_id = ? AND owner_user_id = ? AND module_id = ? AND member_instance_id = ?
@@ -82,6 +83,7 @@ export function makeupRoutes(pool: Pool, wechat: WechatService): Router {
 
         if (isSolo) {
           await emit(connection, recordId, 'makeup.approved', { recordId, moduleId, targetDate: body.recordDate });
+          await refreshRecordProjections(connection, moduleId, body.recordDate);
           return {
             record: { recordId: publicId('r', recordId), status: 'locked', recordDate: body.recordDate },
             approval: null,
@@ -116,6 +118,15 @@ export function makeupRoutes(pool: Pool, wechat: WechatService): Router {
                      'unread', ?, ?)`,
             [moduleId, recipient.user_id, `「${user.nickname}」申请补记 ${body.recordDate}`, approvalId,
               body.recordDate, `makeup:${approvalId}:${recipient.user_id}`, expireAt],
+          );
+          await connection.execute(
+             `INSERT IGNORE INTO notification
+               (user_id, type, title, content, module_id, target_type, target_id, record_date,
+                action_type, action_status, expired_at, dedupe_key)
+             VALUES (?, 'makeup_approval', '新的补卡申请', ?, ?, 'makeup_approval', ?, ?,
+                     'approve_makeup', 'actionable', ?, ?)`,
+            [recipient.user_id, `「${user.nickname}」申请补记 ${body.recordDate}`, moduleId, approvalId,
+              body.recordDate, expireAt, `makeup_application:${approvalId}:${recipient.user_id}`],
           );
         }
         await emit(connection, recordId, 'makeup.requested', { recordId, approvalId, moduleId, targetDate: body.recordDate });
@@ -186,6 +197,7 @@ function resolveApproval(pool: Pool, action: 'approve' | 'reject') {
             WHERE record_id = ? AND status = 'pending'`,
           [approval.record_id],
         );
+        await refreshRecordProjections(connection, String(approval.module_id), sqlDate(approval.target_date));
       } else {
         await connection.execute(
           `UPDATE life_record SET status = 'rejected', version = version + 1
@@ -198,6 +210,16 @@ function resolveApproval(pool: Pool, action: 'approve' | 'reject') {
            (approval_id, operator_user_id, operator_member_instance_id, action, result)
          VALUES (?, ?, ?, ?, 'accepted')`,
         [approvalId, user.userId, access.member_instance_id, action],
+      );
+      await connection.execute(
+        `UPDATE notification
+            SET type = 'makeup_result', title = '补卡已处理', content = ?,
+                action_type = 'none', action_status = 'none',
+                is_read = IF(user_id = ?, 1, 0),
+                read_at = IF(user_id = ?, COALESCE(read_at, UTC_TIMESTAMP(3)), NULL),
+                updated_at = UTC_TIMESTAMP(3)
+          WHERE target_type = 'makeup_approval' AND target_id = ?`,
+        [`「${user.nickname}」已${action === 'approve' ? '通过' : '拒绝'}该补卡申请`, user.userId, user.userId, approvalId],
       );
       await connection.execute(
         `UPDATE module_inbox_item

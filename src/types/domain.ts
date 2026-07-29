@@ -1,4 +1,5 @@
 export type ModuleMode = 'solo' | 'group';
+export type RecordPolicy = 'strict' | 'relaxed';
 export type MemberRole = 'creator' | 'member';
 export type RecordStatus = 'pending' | 'active' | 'locked' | 'rejected' | 'cancelled' | 'expired';
 export type MediaStatus = 'idle' | 'selected' | 'processing' | 'ready' | 'failed';
@@ -32,6 +33,7 @@ export interface LifeModule {
   name: string;
   description: string;
   mode: ModuleMode;
+  recordPolicy: RecordPolicy;
   status: ModuleStatus;
   creatorUserId: string;
   createdAt: string;
@@ -178,14 +180,14 @@ export interface JoinApplication {
 export interface AppNotification {
   notificationId: string;
   userId: string;
-  type: 'join_application' | 'join_result' | 'member_change' | 'member_removed' | 'creator_transferred' | 'reaction' | 'makeup_result' | 'module_state' | 'reminder' | 'account';
+  type: 'join_application' | 'join_result' | 'member_change' | 'member_removed' | 'creator_transferred' | 'reaction' | 'makeup_approval' | 'makeup_result' | 'module_state' | 'reminder' | 'account';
   title: string;
   content: string;
   moduleId?: string;
-  targetType?: 'module' | 'join_application' | 'record' | 'member';
+  targetType?: 'module' | 'join_application' | 'makeup_approval' | 'record' | 'member';
   targetId?: string;
   recordDate?: string;
-  actionType: 'none' | 'approve_join';
+  actionType: 'none' | 'approve_join' | 'approve_makeup';
   actionStatus: 'none' | 'actionable' | 'processing' | 'resolved' | 'expired';
   isRead: boolean;
   createdAt: string;

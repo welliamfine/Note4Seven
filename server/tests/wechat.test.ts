@@ -166,4 +166,26 @@ describe('WeChat OpenAPI authentication', () => {
     expect(buildWechatOpenApiUrl('http://127.0.0.1:9000', '/wxa/msg_sec_check', 'token'))
       .toBe('http://127.0.0.1:9000/wxa/msg_sec_check?cloudbase_access_token=token');
   });
+
+  it('generates an experience-version code for the requested subpackage page', async () => {
+    let requestBody: Record<string, unknown> = {};
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(Uint8Array.from([137, 80, 78, 71]), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      });
+    }));
+
+    const service = new WechatService(productionConfig, async () => ({ token: null, state: 'missing' }));
+    await expect(service.getUnlimitedCode('invite-scene', 'subpackages/invite-intro/index'))
+      .resolves.toEqual(Buffer.from([137, 80, 78, 71]));
+    expect(requestBody).toEqual({
+      scene: 'invite-scene',
+      page: 'subpackages/invite-intro/index',
+      check_path: false,
+      env_version: 'trial',
+      width: 430,
+    });
+  });
 });

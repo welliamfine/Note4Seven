@@ -14,6 +14,7 @@ import type { WechatService } from '../services/wechat';
 const createBody = z.object({
   name: z.string().trim().min(1).max(10),
   description: z.string().trim().max(200).default(''),
+  recordPolicy: z.enum(['strict', 'relaxed']),
   templateId: z.string().max(64).optional(),
   clientRequestId: z.string().min(8).max(64),
 });
@@ -47,6 +48,7 @@ interface ModuleRow extends RowDataPacket {
   name: string;
   description: string | null;
   mode: 'solo' | 'group';
+  record_policy: 'strict' | 'relaxed';
   status: 'active' | 'pending_delete' | 'deleted';
   creator_user_id: string;
   active_member_count: number;
@@ -121,9 +123,9 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
 
       const [moduleInsert] = await connection.execute<ResultSetHeader>(
         `INSERT INTO life_module
-           (name, description, template_id, creator_user_id, creator_member_instance_id)
-         VALUES (?, ?, ?, ?, NULL)`,
-        [body.name, body.description || null, templateId, user.userId],
+           (name, description, template_id, creator_user_id, creator_member_instance_id, record_policy)
+         VALUES (?, ?, ?, ?, NULL, ?)`,
+        [body.name, body.description || null, templateId, user.userId, body.recordPolicy],
       );
       const moduleId = String(moduleInsert.insertId);
       const [memberInsert] = await connection.execute<ResultSetHeader>(
@@ -152,6 +154,7 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
       return {
         moduleId: publicId('m', moduleId),
         mode: 'solo',
+        recordPolicy: body.recordPolicy,
         status: 'active',
         currentMember: { memberInstanceId: publicId('mi', memberId), joinSequence: 1, role: 'creator' },
         redirect: { page: 'module_detail', params: { moduleId: publicId('m', moduleId) } },
@@ -247,6 +250,7 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
         name: module.name,
         description: module.description ?? '',
         mode: module.mode,
+        recordPolicy: module.record_policy,
         status: module.status,
         activeMemberCount: module.active_member_count,
         memberLimit: module.member_limit,
@@ -274,6 +278,9 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
   router.patch('/modules/:moduleId', asyncRoute(async (request, response) => {
     const user = authUser(request);
     const moduleId = dbId(request.params.moduleId, 'm');
+    if (request.body && Object.prototype.hasOwnProperty.call(request.body, 'recordPolicy')) {
+      throw new AppError('RECORD_POLICY_IMMUTABLE', '记录模式创建后不能修改', 422);
+    }
     const body = parseBody(updateBody, request);
     await wechat.assertTextAllowed(user.openId, `${body.name}\n${body.description}`);
     const result = await idempotent(pool, user.userId, 'module_update', body.clientRequestId, body, async (connection) => {
@@ -343,6 +350,7 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
       moduleId: publicId('m', moduleId),
       name: module?.name,
       description: module?.description ?? '',
+      recordPolicy: module?.record_policy,
       status: module?.status,
       version: module?.version,
       currentUserRole: access.role,
@@ -404,6 +412,7 @@ async function homeModule(
     moduleName: module.name,
     description: module.description ?? '',
     mode: module.mode,
+    recordPolicy: module.record_policy,
     status: module.status,
     creatorUserId: publicId('u', module.creator_user_id),
     createdAt: isoWithShanghaiOffset(module.created_at),

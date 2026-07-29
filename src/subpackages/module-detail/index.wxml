@@ -11,7 +11,7 @@
       <view class="round-icon" bindtap="openSettings" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="模块设置"><image src="/assets/ui/icons/settings-2.svg" /></view>
     </view>
 
-    <scroll-view scroll-y class="detail-main-scroll" enhanced show-scrollbar="{{false}}">
+    <scroll-view scroll-y="{{!memberCalendarOpen}}" class="detail-main-scroll" enhanced show-scrollbar="{{false}}">
       <view class="detail-scroll-body">
         <scroll-view scroll-x class="member-scroll" enhanced show-scrollbar="false" bindtap="openMembers">
           <view class="member-row">
@@ -28,12 +28,14 @@
           <view class="calendar-heading">
             <view class="calendar-nav-button" bindtap="previousMonth" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="上个月"><image src="/assets/ui/icons/chevron-left.svg" /></view>
             <view class="month-heading-center">
-              <view class="month-number-window"><text class="month-number {{monthNumberClass}}">{{currentMonthLabel}}</text></view>
+              <picker mode="date" fields="month" value="{{month}}-01" start="{{recordDateMin}}" end="{{recordDateMax}}" bindchange="onCalendarMonthPick">
+                <view class="month-number-window" role="button" aria-label="选择月份"><text class="month-number {{monthNumberClass}}">{{currentMonthLabel}}</text></view>
+              </picker>
               <view wx:if="{{module.members.length > 1}}" class="member-calendar-toggle {{memberCalendarOpen ? 'member-calendar-toggle-active' : ''}}" catchtap="toggleMemberCalendar" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="查看单人日历"><image src="/assets/ui/icons/user-round.svg" /></view>
             </view>
             <view class="calendar-nav-button" bindtap="nextMonth" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="下个月"><image src="/assets/ui/icons/chevron-right.svg" /></view>
           </view>
-          <view wx:if="{{memberCalendarOpen}}" class="member-calendar-popover-position" catchtap="stopPropagation">
+          <view wx:if="{{memberCalendarOpen}}" class="member-calendar-popover-position" catchtap="stopPropagation" catchtouchstart="stopPropagation" catchtouchmove="stopPropagation" catchtouchend="stopPropagation" catchtouchcancel="stopPropagation">
             <view class="member-calendar-popover {{memberCalendarClosing ? 'member-calendar-popover-closing' : ''}}">
               <swiper class="member-calendar-swiper" style="height: {{memberCalendars[0].rowCount === 6 ? 624 : 540}}rpx;" current="{{memberCalendarIndex}}" circular="{{memberCalendars.length > 1}}" duration="260" easing-function="easeOutCubic" bindchange="onMemberCalendarChange">
                 <swiper-item wx:for="{{memberCalendars}}" wx:for-item="memberCalendar" wx:key="memberInstanceId">
@@ -118,7 +120,7 @@
       <view class="sheet-handle"></view>
       <view class="editor-heading"><text class="editor-title">{{editorTitle}}</text><view class="sheet-close" bindtap="closeEditor" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="关闭"><image src="/assets/ui/icons/x.svg" /></view></view>
       <scroll-view scroll-y class="editor-content">
-        <text class="photo-label">今天的照片</text>
+        <text class="photo-label">这一天的照片</text>
         <view class="photo-stage {{editorMediaStatus === 'ready' ? 'photo-stage-ready' : ''}}" bindtap="openPhotoSource" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="添加或更换照片">
           <view wx:if="{{editorMediaStatus === 'idle'}}" class="photo-placeholder"><image src="/assets/ui/icons/camera.svg" /><text>添加照片</text></view>
           <view wx:if="{{editorMediaStatus === 'processing'}}" class="processing-view">
@@ -134,7 +136,7 @@
         <button wx:if="{{editorMediaStatus === 'failed' && (editorMediaRetryable || editorOriginalPath)}}" class="retry-button" bindtap="retryMedia">重新生成</button>
         <text class="remark-label">写点什么（可选）</text>
         <textarea class="remark-input" maxlength="100" value="{{editorRemark}}" placeholder="今天发生了什么小事..." placeholder-class="text-placeholder" auto-height bindinput="onRemarkInput" />
-        <button wx:if="{{editorMode === 'edit'}}" class="delete-record" bindtap="deleteTodayRecord">删除今天的记录</button>
+        <button wx:if="{{editorMode === 'edit'}}" class="delete-record" bindtap="deleteTodayRecord">删除这条记录</button>
       </scroll-view>
       <button class="primary-button bottom-action-button editor-submit" disabled="{{editorMediaStatus !== 'ready' || saving}}" loading="{{saving}}" bindtap="submitRecord">{{editorSubmitText}}</button>
     </view>

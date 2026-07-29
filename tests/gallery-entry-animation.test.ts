@@ -16,7 +16,12 @@ const createPage = () => ({
   ...pageDefinition,
   data: structuredClone(pageDefinition.data),
   setData(this: { data: Record<string, unknown> }, update: Record<string, unknown>, callback?: () => void) {
-    Object.assign(this.data, update);
+    Object.entries(update).forEach(([path, value]) => {
+      const keys = path.replace(/\[(\d+)\]/g, '.$1').split('.');
+      let target = this.data;
+      keys.slice(0, -1).forEach((key) => { target = target[key] as Record<string, unknown>; });
+      target[keys.at(-1)!] = value;
+    });
     callback?.();
   },
 }) as unknown as PageDefinition & {
@@ -46,7 +51,7 @@ describe('gallery entry animation', () => {
     vi.unstubAllGlobals();
   });
 
-  it('preloads gallery images, pops them in, and reuses the rendered view on show', async () => {
+  it('preloads gallery images and replaces an edited sticker without reloading the page', async () => {
     let finishRequest!: (value: Record<string, unknown>) => void;
     api.getModuleGallery.mockImplementationOnce(() => new Promise((resolve) => { finishRequest = resolve; }));
     const page = createPage();
@@ -75,16 +80,38 @@ describe('gallery entry animation', () => {
 
     await vi.advanceTimersByTimeAsync(80);
     expect(page.data.stickerPhase).toBe('sticker-entering');
-    await vi.runAllTimersAsync();
+    await vi.advanceTimersByTimeAsync(600);
     expect(page.data.stickerPhase).toBe('sticker-visible');
 
     const renderedView = page.data.view;
+    const unchangedItem = renderedView.items[1];
     page.onHide();
+    api.getModuleGallery.mockResolvedValueOnce({
+      moduleId: 'module_1',
+      moduleName: 'Daily',
+      month: '2026-07',
+      items: [
+        { recordId: 'record_1', recordDate: '2026-07-20', memberInstanceId: 'member_1', displayName: 'Seven', avatarText: 'S', avatarColor: '#eee', remark: '', stickerPath: '/one-new.png', originalPath: '/one-new.png' },
+        { recordId: 'record_2', recordDate: '2026-07-21', memberInstanceId: 'member_1', displayName: 'Seven', avatarText: 'S', avatarColor: '#eee', remark: '', stickerPath: '/two.png', originalPath: '/two.png' },
+      ],
+    });
     page.onShow();
     expect(page.data.view).toBe(renderedView);
-    expect(api.getModuleGallery).toHaveBeenCalledTimes(1);
-    await vi.runAllTimersAsync();
-    expect(page.data.stickerPhase).toBe('sticker-visible');
-    expect(api.getModuleGallery).toHaveBeenCalledTimes(1);
+    expect(page.data.loading).toBe(false);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const refreshedPreload = getImageInfo.mock.calls.find(([options]) => options.src === '/one-new.png');
+    expect(refreshedPreload).toBeTruthy();
+    refreshedPreload?.[0].success({});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(api.getModuleGallery).toHaveBeenCalledTimes(2);
+    expect(page.data.view.items[0].stickerPath).toBe('/one-new.png');
+    expect(page.data.view.items[0].syncPhase).toBe('sticker-hidden');
+    expect(page.data.view.items[1]).toBe(unchangedItem);
+    expect(page.data.loading).toBe(false);
+    page.onHide();
+    expect(page.data.view.items[0].syncPhase).toBe('');
   });
 });

@@ -50,7 +50,7 @@ const owner = ownerSession.token;
 const applicants = applicantSessions.map((session) => session.token);
 const module = await ok('/modules', {
   method: 'POST', token: owner,
-  body: { name: '联调模块', description: run, clientRequestId: `module_${run}` },
+  body: { name: '联调模块', description: run, recordPolicy: 'strict', clientRequestId: `module_${run}` },
 });
 const invite = await ok(`/modules/${module.moduleId}/invites`, {
   method: 'POST', token: owner, body: { clientRequestId: `invite_${run}` },

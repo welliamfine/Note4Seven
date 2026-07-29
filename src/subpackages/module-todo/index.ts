@@ -33,24 +33,23 @@ Page({
     todoLoadInFlight = true;
     try {
       const rawItems = await getModuleInbox(this.data.moduleId);
-      const unreadItems = rawItems.filter((item) => item.status === 'unread' && !requiresAction(item));
-      const readIds = new Set<string>();
-      await Promise.all(unreadItems.map(async (item) => {
+      const processingIds = new Set(this.data.processingIds);
+      const textUnread = rawItems.filter((item) => item.status === 'unread' && !requiresAction(item));
+      const readIds = new Set((await Promise.all(textUnread.map(async (item) => {
         try {
           await markModuleInboxRead(item.itemId, item.notificationId, this.data.moduleId);
-          readIds.add(item.itemId);
+          return item.itemId;
         } catch {
-          // Preserve unread state when the service could not persist it.
+          return undefined;
         }
-      }));
-      const processingIds = new Set(this.data.processingIds);
+      }))).filter((itemId): itemId is string => Boolean(itemId)));
       const items = rawItems.map((item) => ({
         ...item,
-        status: readIds.has(item.itemId) ? 'read' as const : item.status,
+        status: readIds.has(item.itemId) ? 'read' : item.status,
         isProcessing: processingIds.has(item.approval?.approvalId ?? item.application?.applicationId ?? ''),
       }));
       this.setData({ items, loading: false });
-      track('module_todo_view', { moduleId: this.data.moduleId, itemCount: items.length, viewedCount: readIds.size });
+      track('module_todo_view', { moduleId: this.data.moduleId, itemCount: items.length });
     } catch {
       this.setData({ loading: false });
       if (!background) wx.showToast({ title: '待办加载失败', icon: 'none' });
@@ -59,12 +58,6 @@ Page({
     }
   },
   goBack() { void wx.navigateBack(); },
-  async markRead(event: WechatMiniprogram.TouchEvent) {
-    const item = this.data.items.find((candidate) => candidate.itemId === event.currentTarget.dataset.id);
-    if (!item || item.status !== 'unread' || requiresAction(item)) return;
-    await markModuleInboxRead(item.itemId, item.notificationId, this.data.moduleId);
-    await this.load();
-  },
   async resolveMakeup(event: WechatMiniprogram.TouchEvent) {
     const approvalId = event.currentTarget.dataset.approval as string;
     const action = event.currentTarget.dataset.action as 'approve' | 'reject';
@@ -73,8 +66,9 @@ Page({
     try {
       await resolveMakeupApproval(approvalId, action);
       wx.showToast({ title: action === 'approve' ? '补卡已通过' : '补卡已拒绝' });
-    } catch {
-      wx.showToast({ title: '该申请已被处理', icon: 'none' });
+    } catch (error) {
+      const code = error instanceof Error ? String((error as Error & { code?: unknown }).code ?? error.message) : '';
+      wx.showToast({ title: code === 'APPROVAL_ALREADY_RESOLVED' ? '已有人处理过' : '该申请已被处理', icon: 'none' });
     } finally {
       this.setProcessing(approvalId, false);
       await this.load();
@@ -88,8 +82,9 @@ Page({
     try {
       await resolveJoinApplication(applicationId, action);
       wx.showToast({ title: action === 'approve' ? '已同意加入' : '已拒绝申请' });
-    } catch {
-      wx.showToast({ title: '该申请已被处理', icon: 'none' });
+    } catch (error) {
+      const code = error instanceof Error ? String((error as Error & { code?: unknown }).code ?? error.message) : '';
+      wx.showToast({ title: code === 'JOIN_APPLICATION_ALREADY_RESOLVED' ? '已有人处理过' : '该申请已被处理', icon: 'none' });
     } finally {
       this.setProcessing(applicationId, false);
       await this.load();

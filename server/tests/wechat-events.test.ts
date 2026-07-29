@@ -122,13 +122,14 @@ describe('WeChat Cloud Hosting message push', () => {
         ['28', 'trace-cloud-callback'],
       );
 
+      const callsBeforePublicRequest = execute.mock.calls.length;
       const publicResponse = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'text/xml' },
         body: '<xml><Event>wxa_media_check</Event><trace_id>trace-public</trace_id></xml>',
       });
       expect(publicResponse.status).toBe(401);
-      expect(execute).toHaveBeenCalledTimes(3);
+      expect(execute).toHaveBeenCalledTimes(callsBeforePublicRequest);
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());

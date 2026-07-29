@@ -9,10 +9,14 @@
       <text class="invite-description">{{preview.module.description || '一起认真记录生活里的小事'}}</text>
       <view class="inviter-line"><view class="beta-avatar" style="background:{{preview.inviter.avatarColor}};"><image wx:if="{{preview.inviter.avatarUrl}}" src="{{preview.inviter.avatarUrl}}" mode="aspectFill" /><text wx:else>{{preview.inviter.avatarText}}</text></view><view><text>{{preview.inviter.nickname}}</text><text>邀请你一起记录</text></view></view>
       <view class="invite-meta"><view><text>{{preview.memberCount}}/{{preview.memberLimit}}</text><text>当前成员</text></view><view><text>{{countdown}}</text><text>剩余有效时间</text></view></view>
-      <view class="qr-placeholder"><view class="qr-corner qr-a"></view><view class="qr-corner qr-b"></view><view class="qr-corner qr-c"></view><text>Note4Seven</text></view>
+      <view class="invite-code-shell">
+        <image wx:if="{{codeReady}}" class="invite-code-image" src="{{preview.codeUrl}}" mode="aspectFit" show-menu-by-longpress bindtap="previewInviteCode" />
+        <view wx:elif="{{codeFailed}}" class="invite-code-status"><text>体验码生成失败</text><text>请返回后重新生成邀请</text></view>
+        <view wx:else class="invite-code-status"><view class="invite-code-spinner"></view><text>{{codeWaitTimedOut ? '体验码仍在生成' : '正在生成体验码'}}</text></view>
+      </view>
     </view>
   </view></scroll-view>
-  <view class="beta-fixed-action bottom-action-bar content-layer"><view class="invite-actions"><button class="beta-secondary bottom-action-button invite-save-button" disabled="{{!preview || expired || saving}}" bindtap="saveInviteCard"><image src="/assets/ui/icons/download.svg" /><text>{{saving ? '正在保存' : '保存到相册'}}</text></button><button class="beta-primary bottom-action-button" open-type="share" disabled="{{!preview || expired || saving}}" bindtap="shareTap"><text>{{expired ? '邀请已过期' : '立刻分享'}}</text></button></view></view>
+  <view class="beta-fixed-action bottom-action-bar content-layer"><view class="invite-actions"><button class="beta-secondary bottom-action-button invite-save-button" disabled="{{!codeReady || expired || saving}}" bindtap="saveInviteCard"><image src="/assets/ui/icons/download.svg" /><text>{{saving ? '正在保存' : (codeReady ? '保存邀请卡' : '生成体验码中')}}</text></button><button class="beta-primary bottom-action-button" disabled="{{!codeReady || expired || saving}}" bindtap="previewInviteCode"><text>{{expired ? '邀请已过期' : '查看体验码'}}</text></button></view></view>
   <canvas canvas-id="inviteExportCanvas" class="invite-export-canvas"></canvas>
 </view>
 <privacy-dialog />

@@ -1,4 +1,4 @@
-import type { HomeModuleView, ModuleTemplate, User } from '../../types/domain';
+import type { HomeModuleView, ModuleTemplate, RecordPolicy, User } from '../../types/domain';
 import {
   createModule,
   MODULE_DESCRIPTION_MAX_LENGTH,
@@ -172,6 +172,7 @@ Page({
     createName: '',
     createDescription: '',
     selectedTemplateId: '',
+    createRecordPolicy: '' as '' | RecordPolicy,
     createSubmitting: false,
     createError: '',
     memoryMonthLabel: '',
@@ -1166,6 +1167,7 @@ Page({
       createName: '',
       createDescription: '',
       selectedTemplateId: '',
+      createRecordPolicy: '',
       createError: '',
       normalExpanded: true,
     });
@@ -1176,7 +1178,8 @@ Page({
 
   closeCreate() {
     if (this.data.createClosing) return;
-    const hasChanges = Boolean(this.data.createName || this.data.createDescription || this.data.selectedTemplateId);
+    const hasChanges = Boolean(this.data.createName || this.data.createDescription
+      || this.data.selectedTemplateId || this.data.createRecordPolicy);
     if (!hasChanges) {
       void this.dismissCreate();
       return;
@@ -1224,6 +1227,13 @@ Page({
     track('module_create_template_click', { templateId });
   },
 
+  chooseRecordPolicy(event: WechatMiniprogram.TouchEvent) {
+    const recordPolicy = event.currentTarget.dataset.policy as RecordPolicy;
+    if (recordPolicy !== 'strict' && recordPolicy !== 'relaxed') return;
+    this.setData({ createRecordPolicy: recordPolicy, createError: '' });
+    track('module_create_record_policy_click', { recordPolicy });
+  },
+
   async submitCreate() {
     const name = this.data.createName.trim();
     if (!name) {
@@ -1235,12 +1245,17 @@ Page({
       this.setData({ createError: `名称最多${MODULE_NAME_MAX_LENGTH}字，简介最多${MODULE_DESCRIPTION_MAX_LENGTH}字` });
       return;
     }
+    if (!this.data.createRecordPolicy) {
+      this.setData({ createError: '请选择记录模式' });
+      return;
+    }
     const token = ++homeModuleMotionToken;
     this.setData({ createSubmitting: true, createError: '' });
     try {
       const module = await createModule({
         name,
         description,
+        recordPolicy: this.data.createRecordPolicy,
         templateId: this.data.selectedTemplateId || undefined,
         clientRequestId: createId('request'),
       });

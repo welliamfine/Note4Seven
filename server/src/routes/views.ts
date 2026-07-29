@@ -6,7 +6,7 @@ import { inTransaction } from '../db/pool';
 import { AppError } from '../lib/errors';
 import { asyncRoute, ok, parseBody } from '../lib/http';
 import { publicId } from '../lib/ids';
-import { isoWithShanghaiOffset } from '../lib/time';
+import { isoWithShanghaiOffset, shanghaiDate } from '../lib/time';
 import { authUser } from '../middleware/auth';
 import { requireMember } from '../services/access';
 import { idempotent } from '../services/idempotency';
@@ -214,6 +214,40 @@ export function viewRoutes(pool: Pool, storage: StorageService): Router {
     ok(response, { month, items, nextCursor: hasMore ? rows[19].record_id : null, hasMore });
   }));
 
+  router.get('/modules/:moduleId/month-summary', asyncRoute(async (request, response) => {
+    const user = authUser(request);
+    const moduleId = dbId(request.params.moduleId, 'm');
+    const month = queryString(request.query.month);
+    if (!/^(19\d{2}|20\d{2})-(0[1-9]|1[0-2])$/.test(month)) {
+      throw new AppError('VALIDATION_ERROR', '月份必须在 1900-01 至 2099-12 之间', 422);
+    }
+    await requireMember(pool, moduleId, user.userId, { allowPendingDelete: true });
+    const today = shanghaiDate();
+    const monthStart = `${month}-01`;
+    const monthEnd = nextMonthStart(month);
+    const [[summary]] = await pool.execute<RowDataPacket[]>(
+      `SELECT
+         (SELECT COUNT(DISTINCT r.record_date) FROM life_record r
+           WHERE r.module_id = ? AND r.user_id = ? AND r.record_date >= ? AND r.record_date < ?
+             AND r.record_date <= ? AND r.status IN ('active', 'locked')) AS current_user_recorded_days,
+         (SELECT COUNT(*) FROM daily_module_snapshot s
+           WHERE s.module_id = ? AND s.record_date >= ? AND s.record_date < ?
+             AND s.record_date <= ? AND s.is_all_completed = 1) AS joint_completed_days,
+         (SELECT COUNT(*) FROM reaction re JOIN life_record own ON own.record_id = re.record_id
+           WHERE own.module_id = ? AND own.user_id = ? AND own.record_date >= ? AND own.record_date < ?
+             AND own.record_date <= ? AND own.status IN ('active', 'locked') AND re.status = 'active') AS received_reaction_count`,
+      [moduleId, user.userId, monthStart, monthEnd, today, moduleId, monthStart, monthEnd, today,
+        moduleId, user.userId, monthStart, monthEnd, today],
+    );
+    ok(response, {
+      moduleId: publicId('m', moduleId),
+      month,
+      currentUserRecordedDays: Number(summary.current_user_recorded_days ?? 0),
+      jointCompletedDays: Number(summary.joint_completed_days ?? 0),
+      receivedReactionCount: Number(summary.received_reaction_count ?? 0),
+    });
+  }));
+
   router.get('/memories/weekly-overview', asyncRoute(async (request, response) => {
     const user = authUser(request);
     const week = queryString(request.query.week);
@@ -224,10 +258,12 @@ export function viewRoutes(pool: Pool, storage: StorageService): Router {
          COUNT(DISTINCT r.module_id) AS participated_module_count,
          COUNT(*) AS weekly_record_count,
          (SELECT COUNT(*) FROM reaction re JOIN life_record own_record ON own_record.record_id = re.record_id
-           WHERE own_record.user_id = ? AND re.status = 'active' AND re.created_at >= ? AND re.created_at < ?) AS reaction_count
+           WHERE own_record.user_id = ? AND own_record.record_date <= ?
+             AND re.status = 'active' AND re.created_at >= ? AND re.created_at < ?) AS reaction_count
        FROM life_record r
-       WHERE r.user_id = ? AND r.status IN ('active', 'locked') AND r.record_date >= ? AND r.record_date < ?`,
-      [user.userId, start, end, user.userId, start, end],
+       WHERE r.user_id = ? AND r.status IN ('active', 'locked')
+         AND r.record_date >= ? AND r.record_date < ? AND r.record_date <= ?`,
+      [user.userId, shanghaiDate(), start, end, user.userId, start, end, shanghaiDate()],
     );
     ok(response, {
       recordedDays: Number(row.recorded_days ?? 0),
@@ -342,9 +378,9 @@ async function ensureMemoryCard(
       `SELECT r.record_id, r.member_instance_id
          FROM life_record r JOIN media_asset ma ON ma.media_id = r.media_id
         WHERE r.module_id = ? AND DATE_FORMAT(r.record_date, '%Y-%m') = ?
-          AND r.status IN ('active', 'locked') AND ma.status = 'ready'
+          AND r.record_date <= ? AND r.status IN ('active', 'locked') AND ma.status = 'ready'
         ORDER BY SHA2(CONCAT(r.record_id, ?), 256) LIMIT 8`,
-      [moduleId, month, seed],
+      [moduleId, month, shanghaiDate(), seed],
     );
     await connection.execute('DELETE FROM monthly_memory_card_item WHERE memory_card_id = ?', [cardId]);
     if (records.length) {
@@ -386,10 +422,14 @@ async function memoryCard(pool: Pool, storage: StorageService, moduleId: string,
     ),
     pool.execute<RowDataPacket[]>(
       `SELECT COUNT(DISTINCT CASE WHEN s.is_all_completed = 1 THEN s.record_date END) AS joint_days,
+              (SELECT COUNT(DISTINCT own.record_date) FROM life_record own
+                WHERE own.module_id = ? AND own.user_id = ? AND DATE_FORMAT(own.record_date, '%Y-%m') = ?
+                  AND own.record_date <= ? AND own.status IN ('active', 'locked')) AS current_user_recorded_days,
               (SELECT COUNT(*) FROM reaction re JOIN life_record rr ON rr.record_id = re.record_id
-                WHERE rr.module_id = ? AND rr.user_id = ? AND DATE_FORMAT(rr.record_date, '%Y-%m') = ? AND re.status = 'active') AS reactions
+                WHERE rr.module_id = ? AND rr.user_id = ? AND DATE_FORMAT(rr.record_date, '%Y-%m') = ?
+                  AND rr.record_date <= ? AND re.status = 'active') AS reactions
          FROM daily_module_snapshot s WHERE s.module_id = ? AND DATE_FORMAT(s.record_date, '%Y-%m') = ?`,
-      [moduleId, userId, month, moduleId, month],
+      [moduleId, userId, month, shanghaiDate(), moduleId, userId, month, shanghaiDate(), moduleId, month],
     ),
   ]);
   const items = await Promise.all(rows.map(async (row, index) => ({
@@ -403,6 +443,7 @@ async function memoryCard(pool: Pool, storage: StorageService, moduleId: string,
     moduleName: String(moduleRows[0]?.name ?? ''),
     month,
     items,
+    currentUserRecordedDays: Number(stats.current_user_recorded_days ?? 0),
     jointCompletedDays: Number(stats.joint_days ?? 0),
     receivedReactionCount: Number(stats.reactions ?? 0),
     mostUsedEmojiCode: null,
@@ -455,6 +496,12 @@ function numericCursor(value: unknown): string | null {
 function queryString(value: unknown): string {
   if (Array.isArray(value)) return String(value[0] ?? '');
   return String(value ?? '');
+}
+
+function nextMonthStart(month: string): string {
+  const year = Number(month.slice(0, 4));
+  const value = Number(month.slice(5, 7));
+  return value === 12 ? `${year + 1}-01-01` : `${year}-${String(value + 1).padStart(2, '0')}-01`;
 }
 
 function sqlDate(value: Date | string): string {

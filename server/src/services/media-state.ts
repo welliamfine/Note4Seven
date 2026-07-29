@@ -1,4 +1,5 @@
-import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { refreshRecordProjections } from './record-projections';
 
 type Executor = Pick<Pool, 'execute'> | Pick<PoolConnection, 'execute'>;
 
@@ -7,7 +8,7 @@ interface MediaIdRow extends RowDataPacket {
 }
 
 export async function syncRecordForMedia(executor: Executor, mediaId: string): Promise<void> {
-  await executor.execute(
+  const [update] = await executor.execute<ResultSetHeader>(
     `UPDATE life_record r
        JOIN media_asset ma ON ma.media_id = r.media_id
         SET r.status = CASE
@@ -40,6 +41,18 @@ export async function syncRecordForMedia(executor: Executor, mediaId: string): P
       WHERE r.media_id = ? AND r.source = 'normal' AND r.status = 'pending'`,
     [mediaId],
   );
+  if (update.affectedRows !== 1) return;
+  const [records] = await executor.execute<RowDataPacket[]>(
+    `SELECT module_id, record_date, status FROM life_record WHERE media_id = ? LIMIT 1`,
+    [mediaId],
+  );
+  const record = records[0];
+  if (record?.status === 'active') {
+    const recordDate = record.record_date instanceof Date
+      ? record.record_date.toISOString().slice(0, 10)
+      : String(record.record_date).slice(0, 10);
+    await refreshRecordProjections(executor, String(record.module_id), recordDate);
+  }
 }
 
 export async function syncRecordsForTraceId(executor: Executor, traceId: string): Promise<void> {

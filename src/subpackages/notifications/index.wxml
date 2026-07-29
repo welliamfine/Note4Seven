@@ -6,10 +6,12 @@
     <view wx:elif="{{!notifications.length}}" class="beta-empty beta-glass">暂时没有新通知</view>
     <view wx:else class="notification-list">
       <view class="notification-card beta-glass" wx:for="{{notifications}}" wx:key="notificationId" data-id="{{item.notificationId}}" data-module="{{item.moduleId}}" bindtap="openNotification">
-        <view class="notification-head"><text class="notification-title">{{item.title}}</text><text wx:if="{{!item.isRead && item.actionStatus !== 'resolved'}}" class="unread-dot"></text></view>
+        <view class="notification-head"><text class="notification-title">{{item.title}}</text><text wx:if="{{!item.isRead}}" class="unread-dot"></text></view>
         <text class="notification-content">{{item.content}}</text><text class="notification-time">{{item.createdAt}}</text>
         <view wx:if="{{item.application && item.application.status === 'pending' && item.actionStatus === 'actionable'}}" class="notification-actions" catchtap="stopPropagation"><button data-application="{{item.application.applicationId}}" data-action="reject" disabled="{{item.isProcessing}}" bindtap="resolveJoin">拒绝</button><button class="approve" data-application="{{item.application.applicationId}}" data-action="approve" disabled="{{item.isProcessing}}" bindtap="resolveJoin">同意</button></view>
+        <view wx:elif="{{item.approval && item.approval.status === 'pending' && item.actionStatus === 'actionable'}}" class="notification-actions" catchtap="stopPropagation"><button data-approval="{{item.approval.approvalId}}" data-action="reject" disabled="{{item.isProcessing}}" bindtap="resolveMakeup">拒绝</button><button class="approve" data-approval="{{item.approval.approvalId}}" data-action="approve" disabled="{{item.isProcessing}}" bindtap="resolveMakeup">同意</button></view>
         <text wx:elif="{{item.application}}" class="notification-result">{{item.application.status === 'approved' ? '已通过' : item.application.status === 'rejected' ? '已拒绝' : '已处理'}}</text>
+        <text wx:elif="{{item.approval}}" class="notification-result">{{item.approval.status === 'approved' ? '已通过' : item.approval.status === 'rejected' ? '已拒绝' : '已处理'}}</text>
       </view>
     </view>
   </view></scroll-view>

@@ -1,8 +1,13 @@
 import type { NotificationView } from '../../services/api';
-import { getNotifications, markAllNotificationsRead, markNotificationRead, resolveJoinApplication } from '../../services/api';
+import { getNotifications, markAllNotificationsRead, markNotificationRead, resolveJoinApplication, resolveMakeupApproval } from '../../services/api';
 import { track } from '../../services/tracker';
 
 type NotificationItem = NotificationView & { isProcessing: boolean };
+
+function requiresAction(item: NotificationView): boolean {
+  if (item.actionStatus !== 'actionable') return false;
+  return item.application?.status === 'pending' || item.approval?.status === 'pending';
+}
 
 const NOTIFICATION_SYNC_INTERVAL = 5_000;
 let notificationSyncTimer: ReturnType<typeof setInterval> | undefined;
@@ -30,12 +35,19 @@ Page({
       const processingIds = new Set(this.data.processingIds);
       const notifications = items.map((item) => ({
         ...item,
-        isProcessing: Boolean(item.application && processingIds.has(item.application.applicationId)),
+        isProcessing: processingIds.has(item.application?.applicationId ?? item.approval?.approvalId ?? ''),
       }));
-      const resolvedUnread = notifications.filter((item) => !item.isRead && item.actionStatus === 'resolved');
-      if (resolvedUnread.length) {
-        resolvedUnread.forEach((item) => { item.isRead = true; });
-        await Promise.all(resolvedUnread.map((item) => markNotificationRead(item.notificationId).catch(() => undefined)));
+      const textUnread = notifications.filter((item) => !item.isRead && !requiresAction(item));
+      if (textUnread.length) {
+        const readIds = new Set((await Promise.all(textUnread.map(async (item) => {
+          try {
+            await markNotificationRead(item.notificationId);
+            return item.notificationId;
+          } catch {
+            return undefined;
+          }
+        }))).filter((notificationId): notificationId is string => Boolean(notificationId)));
+        notifications.forEach((item) => { if (readIds.has(item.notificationId)) item.isRead = true; });
       }
       this.setData({ notifications, loading: false });
       track('notification_center_view', { itemCount: notifications.length, unreadCount: notifications.filter((item) => !item.isRead).length });
@@ -68,6 +80,28 @@ Page({
       wx.showToast({ title: message, icon: 'none' });
     } finally {
       this.setData({ processingIds: this.data.processingIds.filter((id) => id !== applicationId) });
+      await this.load();
+    }
+  },
+  async resolveMakeup(event: WechatMiniprogram.TouchEvent) {
+    const approvalId = event.currentTarget.dataset.approval as string;
+    const action = event.currentTarget.dataset.action as 'approve' | 'reject';
+    if (!approvalId || this.data.processingIds.includes(approvalId)) return;
+    this.setData({
+      processingIds: [...this.data.processingIds, approvalId],
+      notifications: this.data.notifications.map((item) => ({
+        ...item,
+        isProcessing: item.approval?.approvalId === approvalId ? true : item.isProcessing,
+      })),
+    });
+    try {
+      await resolveMakeupApproval(approvalId, action);
+      wx.showToast({ title: action === 'approve' ? '补卡已通过' : '补卡已拒绝' });
+    } catch (error) {
+      const code = error instanceof Error ? String((error as Error & { code?: unknown }).code ?? error.message) : '';
+      wx.showToast({ title: code === 'APPROVAL_ALREADY_RESOLVED' ? '已有人处理过' : '该申请已被处理', icon: 'none' });
+    } finally {
+      this.setData({ processingIds: this.data.processingIds.filter((id) => id !== approvalId) });
       await this.load();
     }
   },

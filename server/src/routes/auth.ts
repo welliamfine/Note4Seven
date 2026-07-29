@@ -5,7 +5,7 @@ import type { AppConfig } from '../config';
 import { asyncRoute, ok, parseBody } from '../lib/http';
 import { AppError } from '../lib/errors';
 import { opaqueToken, publicId, sha256 } from '../lib/ids';
-import { addHours, isoWithShanghaiOffset } from '../lib/time';
+import { addHours, isoWithShanghaiOffset, shanghaiDate } from '../lib/time';
 import { authUser } from '../middleware/auth';
 import { idempotent } from '../services/idempotency';
 import type { StorageService } from '../services/storage';
@@ -81,7 +81,7 @@ export function authRoutes(pool: Pool, config: AppConfig, storage: StorageServic
     const user = authUser(request);
     const [[stats]] = await pool.query<RowDataPacket[]>(
       `SELECT
-         COUNT(DISTINCT CASE WHEN r.status IN ('active', 'locked') THEN r.record_date END) AS recorded_days,
+         COUNT(DISTINCT CASE WHEN r.status IN ('active', 'locked') AND r.record_date <= ? THEN r.record_date END) AS recorded_days,
          COUNT(DISTINCT CASE WHEN mm.status = 'active' AND m.status = 'active' THEN mm.module_id END) AS active_module_count,
          (SELECT COUNT(*) FROM notification n
            WHERE n.user_id = ? AND n.is_read = 0 AND n.action_status <> 'resolved') AS unread_count
@@ -90,7 +90,7 @@ export function authRoutes(pool: Pool, config: AppConfig, storage: StorageServic
        LEFT JOIN module_member mm ON mm.user_id = u.user_id
        LEFT JOIN life_module m ON m.module_id = mm.module_id
        WHERE u.user_id = ?`,
-      [user.userId, user.userId],
+      [shanghaiDate(), user.userId, user.userId],
     );
     ok(response, {
       userId: publicId('u', user.userId),

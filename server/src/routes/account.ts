@@ -86,8 +86,17 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
     const body = parseBody(writeBody, request);
     const result = await idempotent(pool, user.userId, 'notification_read_all', body.clientRequestId, body, async (connection) => {
       const [update] = await connection.execute<ResultSetHeader>(
-        `UPDATE notification SET is_read = 1, read_at = UTC_TIMESTAMP(3), updated_at = UTC_TIMESTAMP(3)
-          WHERE user_id = ? AND is_read = 0`,
+        `UPDATE notification n
+          LEFT JOIN join_application ja
+            ON n.target_type = 'join_application' AND ja.application_id = n.target_id
+          LEFT JOIN makeup_approval ma
+            ON n.target_type = 'makeup_approval' AND ma.approval_id = n.target_id
+           SET n.is_read = 1, n.read_at = UTC_TIMESTAMP(3), n.updated_at = UTC_TIMESTAMP(3)
+         WHERE n.user_id = ? AND n.is_read = 0
+           AND NOT (n.action_status = 'actionable' AND (
+             (n.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')
+             OR (n.target_type = 'makeup_approval' AND COALESCE(ma.status, 'pending') = 'pending')
+           ))`,
         [user.userId],
       );
       await connection.execute(
@@ -98,9 +107,12 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
               OR (n.type = 'makeup_result' AND i.type = 'makeup_result'))
           LEFT JOIN join_application ja
             ON i.target_type = 'join_application' AND ja.application_id = i.target_id
+          LEFT JOIN makeup_approval ma
+            ON i.target_type = 'makeup_approval' AND ma.approval_id = i.target_id
            SET i.status = 'read', i.updated_at = UTC_TIMESTAMP(3)
          WHERE n.user_id = ? AND i.recipient_user_id = ? AND i.status = 'unread'
-           AND NOT (i.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')`,
+           AND NOT (i.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')
+           AND NOT (i.target_type = 'makeup_approval' AND COALESCE(ma.status, 'pending') = 'pending')`,
         [user.userId, user.userId],
       );
       return { updatedCount: update.affectedRows };
@@ -113,13 +125,27 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
     const notificationId = dbId(request.params.notificationId, 'n');
     const body = parseBody(writeBody, request);
     const result = await idempotent(pool, user.userId, 'notification_read', body.clientRequestId, body, async (connection) => {
-      const [update] = await connection.execute<ResultSetHeader>(
-        `UPDATE notification SET is_read = 1, read_at = COALESCE(read_at, UTC_TIMESTAMP(3)), updated_at = UTC_TIMESTAMP(3)
-          WHERE notification_id = ? AND user_id = ?`,
+      await connection.execute<ResultSetHeader>(
+        `UPDATE notification n
+          LEFT JOIN join_application ja
+            ON n.target_type = 'join_application' AND ja.application_id = n.target_id
+          LEFT JOIN makeup_approval ma
+            ON n.target_type = 'makeup_approval' AND ma.approval_id = n.target_id
+           SET n.is_read = 1, n.read_at = COALESCE(n.read_at, UTC_TIMESTAMP(3)), n.updated_at = UTC_TIMESTAMP(3)
+         WHERE n.notification_id = ? AND n.user_id = ?
+           AND NOT (n.action_status = 'actionable' AND (
+             (n.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')
+             OR (n.target_type = 'makeup_approval' AND COALESCE(ma.status, 'pending') = 'pending')
+           ))`,
         [notificationId, user.userId],
       );
-      if (update.affectedRows !== 1) throw new AppError('NOTIFICATION_NOT_FOUND', '通知不存在', 404);
-      await connection.execute(
+      const [notifications] = await connection.execute<RowDataPacket[]>(
+        'SELECT is_read FROM notification WHERE notification_id = ? AND user_id = ? LIMIT 1',
+        [notificationId, user.userId],
+      );
+      if (!notifications[0]) throw new AppError('NOTIFICATION_NOT_FOUND', '通知不存在', 404);
+      const isRead = Boolean(notifications[0].is_read);
+      if (isRead) await connection.execute(
         `UPDATE module_inbox_item i
           JOIN notification n ON n.target_id = i.target_id AND n.target_type = i.target_type
             AND (n.target_type = 'join_application'
@@ -127,13 +153,16 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
               OR (n.type = 'makeup_result' AND i.type = 'makeup_result'))
           LEFT JOIN join_application ja
             ON i.target_type = 'join_application' AND ja.application_id = i.target_id
+          LEFT JOIN makeup_approval ma
+            ON i.target_type = 'makeup_approval' AND ma.approval_id = i.target_id
            SET i.status = 'read', i.updated_at = UTC_TIMESTAMP(3)
          WHERE n.notification_id = ? AND n.user_id = ? AND i.recipient_user_id = ?
            AND i.status = 'unread'
-           AND NOT (i.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')`,
+           AND NOT (i.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')
+           AND NOT (i.target_type = 'makeup_approval' AND COALESCE(ma.status, 'pending') = 'pending')`,
         [notificationId, user.userId, user.userId],
       );
-      return { notificationId: publicId('n', notificationId), isRead: true };
+      return { notificationId: publicId('n', notificationId), isRead };
     });
     ok(response, result);
   }));
@@ -258,7 +287,7 @@ function relativeTime(value: Date): string {
 }
 
 function targetPublicId(type: string, id: string): string {
-  const prefix: Record<string, string> = { module: 'm', join_application: 'ja', record: 'r', member: 'mi' };
+  const prefix: Record<string, string> = { module: 'm', join_application: 'ja', makeup_approval: 'ma', record: 'r', member: 'mi' };
   return publicId(prefix[type] ?? type, id);
 }
 

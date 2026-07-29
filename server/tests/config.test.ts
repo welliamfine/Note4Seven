@@ -55,6 +55,14 @@ describe('loadConfig', () => {
     expect(loadConfig(productionEnvironment).autoMigrate).toBe(false);
   });
 
+  it('defaults invite codes to the experience version and allows a release override', () => {
+    expect(loadConfig(productionEnvironment).miniProgramCodeEnvVersion).toBe('trial');
+    expect(loadConfig({
+      ...productionEnvironment,
+      MINI_PROGRAM_CODE_ENV_VERSION: 'release',
+    }).miniProgramCodeEnvVersion).toBe('release');
+  });
+
   it('requires capability-specific production configuration', () => {
     expect(() => loadConfig({ ...productionEnvironment, ENABLE_STORAGE_EVENTS: 'true' })).toThrow('STORAGE_EVENT_TOKEN');
     expect(() => loadConfig({ ...productionEnvironment, ENABLE_SUBSCRIPTIONS: 'true' })).toThrow('SUBSCRIBE_TEMPLATE_ID');

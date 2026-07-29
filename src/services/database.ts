@@ -17,7 +17,7 @@ import { DEFAULT_MODULE_TEMPLATES } from '../config/module-templates';
 import { addDays, shanghaiDate, shanghaiNowIso } from '../utils/date';
 
 const DATABASE_KEY = 'notemylife.alpha.database.v1';
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 export const STICKER_PATHS = [
   '/assets/stickers/group-1.png',
@@ -94,6 +94,7 @@ function createSeedDatabase(): AppDatabase {
     name: '今天喝了什么',
     description: '把每天的一杯小快乐留下来',
     mode: 'solo',
+    recordPolicy: 'strict',
     status: 'active',
     creatorUserId: me.userId,
     createdAt: now,
@@ -105,6 +106,7 @@ function createSeedDatabase(): AppDatabase {
     name: '今天吃什么',
     description: '认真吃饭，也认真分享',
     mode: 'group',
+    recordPolicy: 'strict',
     status: 'active',
     creatorUserId: friends[0].userId,
     createdAt: now,
@@ -120,6 +122,7 @@ function createSeedDatabase(): AppDatabase {
     name: '周末去哪里',
     description: '收集那些值得出门的日子',
     mode: 'group',
+    recordPolicy: 'strict',
     status: 'active',
     creatorUserId: me.userId,
     createdAt: now,
@@ -377,6 +380,13 @@ function migrateJoinApplicationsToModuleInbox(database: AppDatabase): void {
         expireAt: application.expireAt,
       });
     });
+  database.schemaVersion = 8;
+}
+
+function migrateRecordPolicies(database: AppDatabase): void {
+  database.modules.forEach((module) => {
+    module.recordPolicy ??= 'strict';
+  });
   database.schemaVersion = SCHEMA_VERSION;
 }
 
@@ -408,6 +418,9 @@ export function bootstrapDatabase(): void {
   }
   if (existing?.schemaVersion === 7) {
     migrateJoinApplicationsToModuleInbox(existing);
+  }
+  if (existing?.schemaVersion === 8) {
+    migrateRecordPolicies(existing);
     wx.setStorageSync(DATABASE_KEY, existing);
   } else if (existing?.schemaVersion === SCHEMA_VERSION && !existing.betaDemoSeeded) {
     seedBetaDemoState(existing);

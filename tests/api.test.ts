@@ -12,8 +12,10 @@ import {
   getModule,
   getModuleGallery,
   getModuleInbox,
+  getModuleMonthSummary,
   getModuleReminder,
   getNotifications,
+  getProfileOverview,
   getPrivacyView,
   getRecycleBin,
   getRecordReactions,
@@ -73,6 +75,7 @@ describe('Alpha service contract', () => {
     const request = {
       name: '夜晚散步',
       description: '每天出去走一走',
+      recordPolicy: 'strict' as const,
       clientRequestId: 'request_same',
     };
     const first = await createModule(request);
@@ -83,10 +86,16 @@ describe('Alpha service contract', () => {
   });
 
   it('enforces module title and introduction limits when creating and editing', async () => {
-    await expect(createModule({ name: '12345678901', description: 'ok', clientRequestId: 'too_long_name' })).rejects.toThrow('MODULE_INPUT_INVALID');
-    await expect(createModule({ name: 'valid', description: 'd'.repeat(201), clientRequestId: 'too_long_description' })).rejects.toThrow('MODULE_INPUT_INVALID');
+    await expect(createModule({
+      name: 'valid', description: '', clientRequestId: 'missing_policy',
+    } as unknown as Parameters<typeof createModule>[0])).rejects.toThrow('MODULE_INPUT_INVALID');
+    await expect(createModule({
+      name: 'valid', description: '', recordPolicy: 'casual', clientRequestId: 'invalid_policy',
+    } as unknown as Parameters<typeof createModule>[0])).rejects.toThrow('MODULE_INPUT_INVALID');
+    await expect(createModule({ name: '12345678901', description: 'ok', recordPolicy: 'strict', clientRequestId: 'too_long_name' })).rejects.toThrow('MODULE_INPUT_INVALID');
+    await expect(createModule({ name: 'valid', description: 'd'.repeat(201), recordPolicy: 'strict', clientRequestId: 'too_long_description' })).rejects.toThrow('MODULE_INPUT_INVALID');
 
-    const module = await createModule({ name: 'valid', description: 'd'.repeat(200), clientRequestId: 'valid_limits' });
+    const module = await createModule({ name: 'valid', description: 'd'.repeat(200), recordPolicy: 'strict', clientRequestId: 'valid_limits' });
     await expect(updateModuleInfo(module.moduleId, '12345678901', 'ok')).rejects.toThrow('MODULE_INPUT_INVALID');
     await expect(updateModuleInfo(module.moduleId, 'valid', 'd'.repeat(201))).rejects.toThrow('MODULE_INPUT_INVALID');
     const updated = await updateModuleInfo(module.moduleId, '1234567890', 'd'.repeat(200));
@@ -134,6 +143,12 @@ describe('Alpha service contract', () => {
     expect(edited.firstEffectiveAt).toBe(created.firstEffectiveAt);
     expect(edited.remark).toBe('更新过的记录');
 
+    const galleryAfterEdit = await getModuleGallery('module_dinner', today.slice(0, 7));
+    expect(galleryAfterEdit.items.find((item) => item.recordId === created.recordId)).toMatchObject({
+      originalPath: STICKER_PATHS[2],
+      stickerPath: STICKER_PATHS[2],
+    });
+
     await deleteRecord(created.recordId);
     const rerecorded = await saveRecord({
       moduleId: 'module_dinner',
@@ -145,6 +160,101 @@ describe('Alpha service contract', () => {
     });
     expect(rerecorded.recordId).not.toBe(created.recordId);
     expect((await getModule('module_dinner')).members).toHaveLength(3);
+  });
+
+  it('migrates existing modules to strict and keeps strict date rules unchanged', async () => {
+    expect(readDatabase().modules.every((module) => module.recordPolicy === 'strict')).toBe(true);
+    const yesterday = addDays(shanghaiDate(), -1);
+    const future = addDays(shanghaiDate(), 1);
+    await expect(saveRecord({
+      moduleId: 'module_coffee', recordDate: yesterday, originalPath: STICKER_PATHS[0],
+      stickerPath: STICKER_PATHS[0], remark: '', clientRequestId: 'strict_past_normal',
+    })).rejects.toThrow('RECORD_DATE_LOCKED');
+    await expect(saveRecord({
+      moduleId: 'module_coffee', recordDate: future, originalPath: STICKER_PATHS[0],
+      stickerPath: STICKER_PATHS[0], remark: '', clientRequestId: 'strict_future_normal',
+    })).rejects.toThrow('RECORD_DATE_LOCKED');
+    await expect(submitMakeupRecord({
+      moduleId: 'module_coffee', recordDate: addDays(shanghaiDate(), -4), originalPath: STICKER_PATHS[0],
+      stickerPath: STICKER_PATHS[0], remark: '', clientRequestId: 'strict_expired_makeup',
+    })).rejects.toThrow('MAKEUP_DATE_INVALID');
+  });
+
+  it('allows relaxed past and future records while excluding future records from statistics', async () => {
+    const module = await createModule({
+      name: '随手记录',
+      description: '不限日期的纯记录',
+      recordPolicy: 'relaxed',
+      clientRequestId: 'relaxed_module',
+    });
+    const pastDate = addDays(shanghaiDate(), -10);
+    const futureDate = '2099-12-31';
+    updateDatabase((database) => {
+      const current = database.modules.find((item) => item.moduleId === module.moduleId)?.members[0];
+      if (current) current.joinedAt = `${pastDate}T00:00:00+08:00`;
+    });
+
+    const past = await saveRecord({
+      moduleId: module.moduleId, recordDate: pastDate, originalPath: STICKER_PATHS[1],
+      stickerPath: STICKER_PATHS[1], remark: '过去', clientRequestId: 'relaxed_past',
+    });
+    const recordedDaysBeforeFuture = (await getProfileOverview()).recordedDays;
+    const future = await saveRecord({
+      moduleId: module.moduleId, recordDate: futureDate, originalPath: STICKER_PATHS[2],
+      stickerPath: STICKER_PATHS[2], remark: '未来', clientRequestId: 'relaxed_future',
+    });
+    expect(past.status).toBe('active');
+    expect(future.status).toBe('active');
+    expect((await getProfileOverview()).recordedDays).toBe(recordedDaysBeforeFuture);
+    expect((await getModuleGallery(module.moduleId, futureDate.slice(0, 7))).items
+      .some((item) => item.recordId === future.recordId)).toBe(true);
+    expect((await getModuleMonthSummary(module.moduleId, futureDate.slice(0, 7))).currentUserRecordedDays).toBe(0);
+    expect(readDatabase().dailySnapshots.find((snapshot) => snapshot.moduleId === module.moduleId
+      && snapshot.recordDate === pastDate)).toMatchObject({ completedMemberCount: 1, isAllCompleted: true });
+
+    await getMemoryView(module.moduleId, pastDate.slice(0, 7));
+    const edited = await saveRecord({
+      moduleId: module.moduleId, recordId: past.recordId, recordDate: pastDate,
+      originalPath: STICKER_PATHS[3], stickerPath: STICKER_PATHS[3], remark: '已编辑',
+      clientRequestId: 'relaxed_past_edit',
+    });
+    expect(edited.remark).toBe('已编辑');
+    expect(readDatabase().monthlyMemoryCards.find((card) => card.moduleId === module.moduleId
+      && card.month === pastDate.slice(0, 7))?.dataVersion).toBe('');
+
+    await deleteRecord(past.recordId);
+    expect(readDatabase().dailySnapshots.find((snapshot) => snapshot.moduleId === module.moduleId
+      && snapshot.recordDate === pastDate)).toMatchObject({ completedMemberCount: 0, isAllCompleted: false });
+    await deleteRecord(future.recordId);
+    expect(await getDateRecords(module.moduleId, futureDate)).toHaveLength(0);
+    await expect(submitMakeupRecord({
+      moduleId: module.moduleId, recordDate: pastDate, originalPath: STICKER_PATHS[0],
+      stickerPath: STICKER_PATHS[0], remark: '', clientRequestId: 'relaxed_no_makeup',
+    })).rejects.toThrow('MAKEUP_NOT_APPLICABLE');
+  });
+
+  it('enforces relaxed record date boundaries and one record per member per day', async () => {
+    const module = await createModule({
+      name: '边界记录', description: '', recordPolicy: 'relaxed', clientRequestId: 'relaxed_bounds_module',
+    });
+    for (const recordDate of ['1899-12-31', '2100-01-01']) {
+      await expect(saveRecord({
+        moduleId: module.moduleId, recordDate, originalPath: STICKER_PATHS[0],
+        stickerPath: STICKER_PATHS[0], remark: '', clientRequestId: `relaxed_${recordDate}`,
+      })).rejects.toThrow('RECORD_DATE_LOCKED');
+    }
+    const recordDate = '1900-01-01';
+    const first = await saveRecord({
+      moduleId: module.moduleId, recordDate, originalPath: STICKER_PATHS[0],
+      stickerPath: STICKER_PATHS[0], remark: '第一条', clientRequestId: 'relaxed_boundary_first',
+    });
+    const second = await saveRecord({
+      moduleId: module.moduleId, recordDate, originalPath: STICKER_PATHS[1],
+      stickerPath: STICKER_PATHS[1], remark: '仍是同一条', clientRequestId: 'relaxed_boundary_second',
+    });
+    expect(second.recordId).toBe(first.recordId);
+    expect(readDatabase().records.filter((record) => record.moduleId === module.moduleId
+      && record.recordDate === recordDate)).toHaveLength(1);
   });
 
   it('deletes solo modules and all of their records', async () => {
@@ -184,10 +294,12 @@ describe('Beta relationship contract', () => {
     legacy.notifications = [];
     legacy.moduleInboxItems = [];
     legacy.auditLog = [];
+    legacy.modules.forEach((module) => { delete (module as { recordPolicy?: 'strict' | 'relaxed' }).recordPolicy; });
     storage.set('notemylife.alpha.database.v1', legacy);
 
     const migrated = readDatabase();
-    expect(migrated.schemaVersion).toBe(8);
+    expect(migrated.schemaVersion).toBe(9);
+    expect(migrated.modules.every((module) => module.recordPolicy === 'strict')).toBe(true);
     expect(migrated.betaDemoSeeded).toBe(true);
     expect(migrated.templates.map((template) => template.name)).toEqual([
       '饮品check！',
@@ -246,7 +358,8 @@ describe('Beta relationship contract', () => {
     expect(resolved.resultMemberInstanceId).toBeTruthy();
     const notifications = await getNotifications();
     expect(notifications.find((notification) => notification.targetId === application.applicationId)).toMatchObject({
-      actionStatus: 'resolved',
+      type: 'join_result',
+      actionStatus: 'none',
       isRead: true,
     });
     expect(notifications.filter((notification) => !notification.isRead)).toHaveLength(unreadBeforeResolution - 1);
@@ -275,6 +388,15 @@ describe('Beta relationship contract', () => {
       .find((item) => item.itemId === memberJoinedItem!.itemId)?.status).toBe('read');
     expect((await getNotifications())
       .find((item) => item.notificationId === memberJoinedNotification!.notificationId)?.isRead).toBe(true);
+
+    updateDatabase((database) => {
+      database.currentUser = { userId: 'user_new', nickname: '新朋友', avatarText: '🌱', avatarColor: '#8cab85' };
+    });
+    expect((await getModuleInbox('module_weekend'))
+      .find((item) => item.type === 'member_change' && item.targetId === resolved.resultMemberInstanceId)).toMatchObject({
+        title: '成员已加入',
+        status: 'unread',
+      });
   });
 
   it('enforces one reaction per member and blocks reacting to your own record', async () => {
@@ -309,10 +431,21 @@ describe('Beta relationship contract', () => {
     });
     const pendingItem = (await getModuleInbox('module_dinner'))
       .find((item) => item.targetId === created.approval!.approvalId);
+    const pendingNotification = (await getNotifications())
+      .find((item) => item.targetId === created.approval!.approvalId);
     expect(pendingItem).toMatchObject({ status: 'unread', approval: { status: 'pending' } });
+    expect(pendingNotification).toMatchObject({
+      type: 'makeup_approval',
+      actionStatus: 'actionable',
+      isRead: false,
+      approval: { status: 'pending' },
+    });
     await markModuleInboxRead(pendingItem!.itemId, undefined, 'module_dinner');
+    await markNotificationRead(pendingNotification!.notificationId);
     expect((await getModuleInbox('module_dinner'))
       .find((item) => item.itemId === pendingItem!.itemId)?.status).toBe('unread');
+    expect((await getNotifications())
+      .find((item) => item.notificationId === pendingNotification!.notificationId)?.isRead).toBe(false);
 
     const approval = await resolveMakeupApproval(created.approval!.approvalId, 'approve');
     expect(approval.status).toBe('approved');
@@ -321,6 +454,13 @@ describe('Beta relationship contract', () => {
       .find((item) => item.itemId === pendingItem!.itemId)).toMatchObject({
         type: 'makeup_result',
         status: 'read',
+        approval: { status: 'approved' },
+      });
+    expect((await getNotifications())
+      .find((item) => item.notificationId === pendingNotification!.notificationId)).toMatchObject({
+        type: 'makeup_result',
+        actionStatus: 'none',
+        isRead: true,
         approval: { status: 'approved' },
       });
     await expect(resolveMakeupApproval(created.approval!.approvalId, 'reject')).rejects.toThrow('APPROVAL_ALREADY_RESOLVED');
@@ -335,9 +475,14 @@ describe('Beta relationship contract', () => {
       status: 'unread',
       approval: { status: 'approved' },
     });
+    const synchronizedNotification = (await getNotifications())
+      .find((item) => item.targetId === created.approval!.approvalId);
+    expect(synchronizedNotification).toMatchObject({ type: 'makeup_result', isRead: false });
     await markModuleInboxRead(synchronizedItem!.itemId, undefined, 'module_dinner');
     expect((await getModuleInbox('module_dinner'))
       .find((item) => item.itemId === synchronizedItem!.itemId)?.status).toBe('read');
+    expect((await getNotifications())
+      .find((item) => item.notificationId === synchronizedNotification!.notificationId)?.isRead).toBe(true);
 
     updateDatabase((database) => {
       database.currentUser = { userId: 'user_me', nickname: '小满', avatarText: '🐱', avatarColor: '#e65f45' };
@@ -357,6 +502,7 @@ describe('Beta relationship contract', () => {
     const module = await createModule({
       name: '夜间散步',
       description: '每天出去走一走',
+      recordPolicy: 'strict',
       clientRequestId: 'solo_for_makeup',
     });
     const result = await submitMakeupRecord({
@@ -369,6 +515,16 @@ describe('Beta relationship contract', () => {
     });
     expect(result.approval).toBeUndefined();
     expect(result.record.status).toBe('locked');
+    await expect(saveRecord({
+      moduleId: module.moduleId,
+      recordId: result.record.recordId,
+      recordDate: result.record.recordDate,
+      originalPath: STICKER_PATHS[1],
+      stickerPath: STICKER_PATHS[1],
+      remark: '不能修改',
+      clientRequestId: 'strict_locked_edit',
+    })).rejects.toThrow('RECORD_DATE_LOCKED');
+    await expect(deleteRecord(result.record.recordId)).rejects.toThrow('RECORD_DELETE_FORBIDDEN');
   });
 
   it('revokes calendar and reaction access immediately after a participant exits', async () => {
@@ -467,7 +623,7 @@ describe('RC content and lifecycle contract', () => {
   });
 
   it('stores personal reminder settings and emits at most one in-app reminder per day', async () => {
-    const module = await createModule({ name: '睡前阅读', description: '留下一页书', clientRequestId: 'reminder_module' });
+    const module = await createModule({ name: '睡前阅读', description: '留下一页书', recordPolicy: 'strict', clientRequestId: 'reminder_module' });
     const initial = await getModuleReminder(module.moduleId);
     expect(initial.enabled).toBe(false);
     await updateModuleReminder(module.moduleId, {

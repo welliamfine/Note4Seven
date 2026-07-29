@@ -28,6 +28,7 @@ import type {
 } from '../types/domain';
 import { addDays, buildMonthGrid, differenceInDays, shanghaiDate, shanghaiNowIso } from '../utils/date';
 import { createId } from '../utils/id';
+import { canCreateNormalRecord, canMutateRecord, canSubmitMakeup } from '../utils/record-policy';
 import { readDatabase, STICKER_PATHS, updateDatabase } from './database';
 import { setTrackingConsent, track } from './tracker';
 
@@ -126,7 +127,8 @@ export interface ProfileOverview {
 export async function getProfileOverview(): Promise<ProfileOverview> {
   const database = readDatabase();
   const recordedDays = new Set(database.records
-    .filter((record) => record.userId === database.currentUser.userId && isFormalRecord(record))
+    .filter((record) => record.userId === database.currentUser.userId
+      && record.recordDate <= shanghaiDate() && isFormalRecord(record))
     .map((record) => record.recordDate)).size;
   const moduleCount = database.modules.filter((module) => module.status === 'active'
     && module.members.some((member) => member.userId === database.currentUser.userId && member.active)).length;
@@ -197,7 +199,8 @@ export async function getHomeModules(
       members: activeMembers(module),
       pinned: Boolean(preference?.pinned),
       unreadInboxCount: database.moduleInboxItems.filter((item) => item.moduleId === module.moduleId
-        && item.recipientUserId === database.currentUser.userId && item.status === 'unread').length,
+        && item.recipientUserId === database.currentUser.userId
+        && item.status === 'unread').length,
       todayPreviewItems: todayRecords.map((record, index) => ({
         recordId: record.recordId,
         memberInstanceId: record.memberInstanceId,
@@ -288,6 +291,7 @@ export async function removeModuleForCurrentUser(moduleId: string): Promise<'del
 export interface CreateModuleInput {
   name: string;
   description: string;
+  recordPolicy: 'strict' | 'relaxed';
   templateId?: string;
   clientRequestId: string;
 }
@@ -300,6 +304,7 @@ export async function createModule(input: CreateModuleInput): Promise<LifeModule
     if (!trimmedName || trimmedName.length > MODULE_NAME_MAX_LENGTH || trimmedDescription.length > MODULE_DESCRIPTION_MAX_LENGTH) {
       throw new Error('MODULE_INPUT_INVALID');
     }
+    if (!['strict', 'relaxed'].includes(input.recordPolicy)) throw new Error('MODULE_INPUT_INVALID');
     const previousId = database.idempotency[input.clientRequestId];
     if (previousId) {
       const previous = database.modules.find((module) => module.moduleId === previousId);
@@ -321,6 +326,7 @@ export async function createModule(input: CreateModuleInput): Promise<LifeModule
       name: trimmedName,
       description: trimmedDescription,
       mode: 'solo',
+      recordPolicy: input.recordPolicy,
       status: 'active',
       creatorUserId: database.currentUser.userId,
       createdAt: now,
@@ -535,9 +541,9 @@ export async function saveRecord(input: SaveRecordInput): Promise<LifeRecord> {
       const previous = database.records.find((record) => record.recordId === previousId);
       if (previous) return previous;
     }
-    if (input.recordDate !== shanghaiDate()) throw new Error('RECORD_DATE_LOCKED');
     const module = database.modules.find((item) => item.moduleId === input.moduleId);
     if (!module) throw new Error('MODULE_NOT_FOUND');
+    if (!canCreateNormalRecord(module.recordPolicy, input.recordDate)) throw new Error('RECORD_DATE_LOCKED');
     if (module.status !== 'active') throw new Error('MODULE_PENDING_DELETE');
     const currentMember = module.members.find(
       (item) => item.userId === database.currentUser.userId && item.active,
@@ -555,11 +561,16 @@ export async function saveRecord(input: SaveRecordInput): Promise<LifeRecord> {
         );
     if (existing) {
       if (existing.userId !== database.currentUser.userId) throw new Error('RECORD_ACCESS_DENIED');
+      if (existing.moduleId !== input.moduleId || existing.recordDate !== input.recordDate
+        || existing.status !== 'active' || !canMutateRecord(module.recordPolicy, existing.recordDate)) {
+        throw new Error('RECORD_ACCESS_DENIED');
+      }
       existing.originalPath = input.originalPath;
       existing.stickerPath = input.stickerPath;
       existing.remark = input.remark.trim();
       existing.updatedAt = now;
       database.idempotency[input.clientRequestId] = existing.recordId;
+      invalidateLocalMemoryCard(database, input.moduleId, input.recordDate.slice(0, 7));
       track('record_edit_success', { recordId: existing.recordId, firstEffectiveAtPreserved: true });
       return existing;
     }
@@ -580,6 +591,7 @@ export async function saveRecord(input: SaveRecordInput): Promise<LifeRecord> {
     };
     database.records.push(record);
     database.idempotency[input.clientRequestId] = record.recordId;
+    refreshLocalRecordProjections(database, module, input.recordDate);
     track('record_submit_success', { recordId: record.recordId, editorMode: 'create', recordSource: 'normal' });
     return record;
   });
@@ -591,10 +603,13 @@ export async function deleteRecord(recordId: string): Promise<void> {
     const index = database.records.findIndex((record) => record.recordId === recordId);
     if (index < 0) return;
     const record = database.records[index];
-    if (record.userId !== database.currentUser.userId || record.recordDate !== shanghaiDate()) {
-      throw new Error('RECORD_ACCESS_DENIED');
+    const module = database.modules.find((item) => item.moduleId === record.moduleId);
+    if (!module || record.userId !== database.currentUser.userId) throw new Error('RECORD_ACCESS_DENIED');
+    if (record.status !== 'active' || !canMutateRecord(module.recordPolicy, record.recordDate)) {
+      throw new Error('RECORD_DELETE_FORBIDDEN');
     }
     database.records.splice(index, 1);
+    refreshLocalRecordProjections(database, module, record.recordDate);
   });
   track('record_delete_success', { recordId });
 }
@@ -816,6 +831,7 @@ export interface InvitePreview {
   memberCount: number;
   memberLimit: number;
   valid: boolean;
+  codeUrl?: string;
 }
 
 export async function createModuleInvite(moduleId: string): Promise<InvitePreview> {
@@ -947,6 +963,7 @@ export async function submitJoinApplication(inviteId: string): Promise<JoinAppli
 export interface NotificationView extends AppNotification {
   moduleName: string;
   application?: JoinApplication;
+  approval?: MakeupApproval;
 }
 
 export async function getNotifications(): Promise<NotificationView[]> {
@@ -963,6 +980,9 @@ export async function getNotifications(): Promise<NotificationView[]> {
         application: notification.targetType === 'join_application'
           ? database.joinApplications.find((item) => item.applicationId === notification.targetId)
           : undefined,
+        approval: notification.targetType === 'makeup_approval'
+          ? database.makeupApprovals.find((item) => item.approvalId === notification.targetId)
+          : undefined,
       }));
   });
 }
@@ -977,6 +997,17 @@ function moduleInboxItemRequiresAction(database: AppDatabase, item: ModuleInboxI
   }
   if (item.targetType === 'makeup_approval') {
     return database.makeupApprovals.some((approval) => approval.approvalId === item.targetId && approval.status === 'pending');
+  }
+  return false;
+}
+
+function notificationRequiresAction(database: AppDatabase, notification: AppNotification): boolean {
+  if (notification.actionStatus !== 'actionable') return false;
+  if (notification.targetType === 'join_application') {
+    return database.joinApplications.some((application) => application.applicationId === notification.targetId && application.status === 'pending');
+  }
+  if (notification.targetType === 'makeup_approval') {
+    return database.makeupApprovals.some((approval) => approval.approvalId === notification.targetId && approval.status === 'pending');
   }
   return false;
 }
@@ -997,6 +1028,7 @@ export async function markNotificationRead(notificationId: string): Promise<void
       (item) => item.notificationId === notificationId && item.userId === database.currentUser.userId,
     );
     if (notification) {
+      if (notificationRequiresAction(database, notification)) return;
       notification.isRead = true;
       notification.updatedAt = shanghaiNowIso();
       if (notification.targetId
@@ -1017,7 +1049,7 @@ export async function markAllNotificationsRead(): Promise<void> {
     const targets = database.notifications
       .filter((item) => item.userId === database.currentUser.userId && item.targetId
         && (item.targetType === 'join_application' || item.type === 'member_change' || item.type === 'makeup_result'));
-    database.notifications.filter((item) => item.userId === database.currentUser.userId).forEach((item) => {
+    database.notifications.filter((item) => item.userId === database.currentUser.userId && !notificationRequiresAction(database, item)).forEach((item) => {
       item.isRead = true;
       item.updatedAt = shanghaiNowIso();
     });
@@ -1074,10 +1106,16 @@ export async function resolveJoinApplication(applicationId: string, action: 'app
     application.resolvedByUserId = database.currentUser.userId;
     application.updatedAt = now;
     database.notifications
-      .filter((notification) => notification.targetId === applicationId)
+      .filter((notification) => notification.targetType === 'join_application' && notification.targetId === applicationId)
       .forEach((notification) => {
-        notification.actionStatus = 'resolved';
-        notification.isRead = true;
+        notification.type = 'join_result';
+        notification.title = action === 'approve' ? '成员已加入' : '加入申请未通过';
+        notification.content = action === 'approve'
+          ? `「${application.applicantNameSnapshot}」已加入「${module.name}」`
+          : `「${application.applicantNameSnapshot}」的加入申请已被拒绝`;
+        notification.actionType = 'none';
+        notification.actionStatus = 'none';
+        notification.isRead = notification.userId === database.currentUser.userId;
         notification.updatedAt = now;
       });
     database.moduleInboxItems
@@ -1094,7 +1132,7 @@ export async function resolveJoinApplication(applicationId: string, action: 'app
     if (joinedMember) {
       const content = `「${joinedMember.nickname}」已加入「${module.name}」`;
       activeMembers(module)
-        .filter((member) => member.userId !== database.currentUser.userId && member.userId !== joinedMember!.userId)
+        .filter((member) => member.userId !== database.currentUser.userId)
         .forEach((member) => {
           database.moduleInboxItems.push({
             itemId: createId('inbox'),
@@ -1280,10 +1318,11 @@ export async function submitMakeupRecord(input: SubmitMakeupInput): Promise<{ re
         };
       }
     }
-    const offset = differenceInDays(input.recordDate, shanghaiDate());
-    if (offset < -3 || offset > -1) throw new Error('MAKEUP_DATE_INVALID');
     const module = database.modules.find((item) => item.moduleId === input.moduleId);
     if (!module) throw new Error('MODULE_NOT_FOUND');
+    if (!canSubmitMakeup(module.recordPolicy, input.recordDate)) {
+      throw new Error(module.recordPolicy === 'relaxed' ? 'MAKEUP_NOT_APPLICABLE' : 'MAKEUP_DATE_INVALID');
+    }
     const currentMember = findActiveMember(database, module);
     const duplicate = database.records.find((record) =>
       record.moduleId === input.moduleId
@@ -1310,7 +1349,10 @@ export async function submitMakeupRecord(input: SubmitMakeupInput): Promise<{ re
     };
     database.records.push(record);
     database.idempotency[input.clientRequestId] = record.recordId;
-    if (direct) return { record };
+    if (direct) {
+      refreshLocalRecordProjections(database, module, input.recordDate);
+      return { record };
+    }
     const attemptNumber = database.makeupApprovals.filter(
       (approval) => approval.moduleId === input.moduleId
         && approval.applicantMemberInstanceId === currentMember.memberInstanceId
@@ -1346,6 +1388,24 @@ export async function submitMakeupRecord(input: SubmitMakeupInput): Promise<{ re
         createdAt: now,
         updatedAt: now,
         expireAt: approval.expireAt,
+      }));
+    activeMembers(module)
+      .filter((member) => member.memberInstanceId !== currentMember.memberInstanceId)
+      .forEach((member) => database.notifications.push({
+        notificationId: createId('notification'),
+        userId: member.userId,
+        type: 'makeup_approval',
+        title: '新的补卡申请',
+        content: `「${currentMember.nickname}」申请补记 ${input.recordDate}`,
+        moduleId: input.moduleId,
+        targetType: 'makeup_approval',
+        targetId: approval.approvalId,
+        recordDate: input.recordDate,
+        actionType: 'approve_makeup',
+        actionStatus: 'actionable',
+        isRead: false,
+        createdAt: now,
+        updatedAt: now,
       }));
     addAudit(database, 'submit_makeup', input.moduleId, approval.approvalId);
     return { record, approval };
@@ -1391,7 +1451,9 @@ export async function getModuleInbox(moduleId: string): Promise<ModuleInboxView[
 export function getModuleInboxCount(moduleId: string): number {
   const database = readDatabase();
   return database.moduleInboxItems.filter(
-    (item) => item.moduleId === moduleId && item.recipientUserId === database.currentUser.userId && item.status === 'unread',
+    (item) => item.moduleId === moduleId
+      && item.recipientUserId === database.currentUser.userId
+      && item.status === 'unread',
   ).length;
 }
 
@@ -1435,7 +1497,7 @@ export async function resolveMakeupApproval(approvalId: string, action: 'approve
     approval.updatedAt = now;
     record.status = action === 'approve' ? 'locked' : 'rejected';
     record.updatedAt = now;
-    if (action === 'approve') ensureSnapshotForDate(database, module, approval.targetDate);
+    if (action === 'approve') refreshLocalRecordProjections(database, module, approval.targetDate);
     database.moduleInboxItems
       .filter((item) => item.targetType === 'makeup_approval' && item.targetId === approvalId)
       .forEach((item) => {
@@ -1445,6 +1507,17 @@ export async function resolveMakeupApproval(approvalId: string, action: 'approve
         item.status = item.recipientUserId === database.currentUser.userId ? 'read' : 'unread';
         item.updatedAt = now;
         item.expireAt = shanghaiNowIso(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+      });
+    database.notifications
+      .filter((notification) => notification.targetType === 'makeup_approval' && notification.targetId === approvalId)
+      .forEach((notification) => {
+        notification.type = 'makeup_result';
+        notification.title = '补卡已处理';
+        notification.content = `「${currentMember.nickname}」已${action === 'approve' ? '通过' : '拒绝'} ${approval.targetDate} 的补卡申请`;
+        notification.actionType = 'none';
+        notification.actionStatus = 'none';
+        notification.isRead = notification.userId === database.currentUser.userId;
+        notification.updatedAt = now;
       });
     database.moduleInboxItems.push({
       itemId: createId('inbox'),
@@ -1518,6 +1591,7 @@ export interface GalleryItem {
 export interface GalleryView {
   moduleId: string;
   moduleName: string;
+  recordPolicy: LifeModule['recordPolicy'];
   month: string;
   items: GalleryItem[];
 }
@@ -1551,7 +1625,7 @@ export async function getModuleGallery(moduleId: string, month: string): Promise
       };
     });
   track('gallery_view', { moduleId, month, itemCount: items.length });
-  return { moduleId, moduleName: module.name, month, items };
+  return { moduleId, moduleName: module.name, recordPolicy: module.recordPolicy, month, items };
 }
 
 export interface ReminderView extends ReminderSubscription {
@@ -1812,17 +1886,32 @@ function ensureSnapshotForDate(database: AppDatabase, module: LifeModule, record
       memberInstanceIds: memberIds,
       requiredMemberCount: memberIds.length,
       completedMemberCount: completed,
-      isAllCompleted: memberIds.length >= 2 && completed === memberIds.length,
+      isAllCompleted: memberIds.length > 0 && completed === memberIds.length,
       calculatedAt: now,
       updatedAt: now,
     };
     database.dailySnapshots.push(snapshot);
   } else {
     snapshot.completedMemberCount = completed;
-    snapshot.isAllCompleted = snapshot.requiredMemberCount >= 2 && completed === snapshot.requiredMemberCount;
+    snapshot.isAllCompleted = snapshot.requiredMemberCount > 0 && completed === snapshot.requiredMemberCount;
     snapshot.updatedAt = now;
   }
   return snapshot;
+}
+
+function invalidateLocalMemoryCard(database: AppDatabase, moduleId: string, month: string): void {
+  const now = shanghaiNowIso();
+  database.monthlyMemoryCards
+    .filter((card) => card.moduleId === moduleId && card.month === month)
+    .forEach((card) => {
+      card.dataVersion = '';
+      card.updatedAt = now;
+    });
+}
+
+function refreshLocalRecordProjections(database: AppDatabase, module: LifeModule, recordDate: string): void {
+  if (recordDate < shanghaiDate()) ensureSnapshotForDate(database, module, recordDate);
+  invalidateLocalMemoryCard(database, module.moduleId, recordDate.slice(0, 7));
 }
 
 function ensureDailySnapshots(database: AppDatabase): void {
@@ -1919,7 +2008,8 @@ export function getModuleMonthSummary(moduleId: string, month: string): {
     findActiveMember(database, module);
     ensureDailySnapshots(database);
     const currentRecords = database.records.filter((record) => record.moduleId === moduleId
-      && record.userId === database.currentUser.userId && record.recordDate.startsWith(month) && isFormalRecord(record));
+      && record.userId === database.currentUser.userId && record.recordDate.startsWith(month)
+      && record.recordDate <= shanghaiDate() && isFormalRecord(record));
     const recordIds = new Set(currentRecords.map((record) => record.recordId));
     return {
       currentUserRecordedDays: new Set(currentRecords.map((record) => record.recordDate)).size,
@@ -1930,9 +2020,14 @@ export function getModuleMonthSummary(moduleId: string, month: string): {
   });
 }
 
+export async function refreshModuleMonthSummary(moduleId: string, month: string) {
+  return getModuleMonthSummary(moduleId, month);
+}
+
 function resolveMemoryCard(database: AppDatabase, moduleId: string, month: string, forceChange: boolean): MonthlyMemoryCard {
   const candidates = database.records
-    .filter((record) => record.moduleId === moduleId && record.recordDate.startsWith(month) && isFormalRecord(record));
+    .filter((record) => record.moduleId === moduleId && record.recordDate.startsWith(month)
+      && record.recordDate <= shanghaiDate() && isFormalRecord(record));
   const dataVersion = candidates.map((record) => `${record.recordId}:${record.updatedAt}`).sort().join('|');
   let card = database.monthlyMemoryCards.find(
     (item) => item.userId === database.currentUser.userId && item.moduleId === moduleId && item.month === month,
@@ -1973,7 +2068,8 @@ export async function getMemoryView(moduleId?: string, month = shanghaiDate().sl
       && module.members.some((member) => member.userId === database.currentUser.userId && member.active));
     if (!modules.length) throw new Error('NO_ACTIVE_MODULE');
     const recentModuleId = database.records
-      .filter((record) => isFormalRecord(record) && modules.some((module) => module.moduleId === record.moduleId))
+      .filter((record) => record.recordDate <= shanghaiDate() && isFormalRecord(record)
+        && modules.some((module) => module.moduleId === record.moduleId))
       .sort((left, right) => right.firstEffectiveAt.localeCompare(left.firstEffectiveAt))[0]?.moduleId;
     const selectedModule = modules.find((module) => module.moduleId === moduleId)
       ?? modules.find((module) => module.moduleId === recentModuleId)
@@ -1983,16 +2079,19 @@ export async function getMemoryView(moduleId?: string, month = shanghaiDate().sl
     const myRecords = database.records.filter((record) => record.userId === database.currentUser.userId
       && record.recordDate >= weekStart && record.recordDate <= today && isFormalRecord(record));
     const myDateSet = new Set(database.records
-      .filter((record) => record.userId === database.currentUser.userId && isFormalRecord(record))
+      .filter((record) => record.userId === database.currentUser.userId
+        && record.recordDate <= today && isFormalRecord(record))
       .map((record) => record.recordDate));
     const currentUserRecordIds = new Set(database.records
-      .filter((record) => record.userId === database.currentUser.userId && isFormalRecord(record))
+      .filter((record) => record.userId === database.currentUser.userId
+        && record.recordDate <= today && isFormalRecord(record))
       .map((record) => record.recordId));
     const received = database.reactions.filter((reaction) => reaction.status === 'active' && currentUserRecordIds.has(reaction.recordId));
     const card = resolveMemoryCard(database, selectedModule.moduleId, month, forceChange);
     const cardRecords = card.recordIds.map((recordId) => database.records.find((record) => record.recordId === recordId)).filter(Boolean) as LifeRecord[];
     const monthlyRecordIds = new Set(database.records
-      .filter((record) => record.moduleId === selectedModule.moduleId && record.recordDate.startsWith(month) && isFormalRecord(record))
+      .filter((record) => record.moduleId === selectedModule.moduleId && record.recordDate.startsWith(month)
+        && record.recordDate <= today && isFormalRecord(record))
       .map((record) => record.recordId));
     const monthlyReactions = database.reactions.filter((reaction) => reaction.status === 'active' && monthlyRecordIds.has(reaction.recordId));
     const emojiCounts = new Map<ReactionEmoji, number>();

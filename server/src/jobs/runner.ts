@@ -6,6 +6,7 @@ import { shanghaiDate } from '../lib/time';
 import type { StorageService } from '../services/storage';
 import type { WechatService } from '../services/wechat';
 import { syncRecordForMedia } from '../services/media-state';
+import { invalidateMonthlyMemoryCards, recalculateDailySnapshot } from '../services/record-projections';
 import type { MetricsRegistry } from '../observability/metrics';
 import { analyticsUserHash } from '../lib/analytics';
 
@@ -390,7 +391,7 @@ async function processInviteCodeEvents(deps: RunnerDependencies): Promise<void> 
       const secret = /^inv_\d+_([a-zA-Z0-9_-]{20,64})$/.exec(publicInviteId)?.[1];
       if (!secret) throw new Error('invalid invite payload');
       const objectKey = `invites/${event.aggregate_id}/code.png`;
-      const code = await deps.wechat.getUnlimitedCode(secret.slice(0, 32), 'pages/invite-intro/index');
+      const code = await deps.wechat.getUnlimitedCode(secret.slice(0, 32), 'subpackages/invite-intro/index');
       await deps.storage.putGeneratedObject(objectKey, code, 'image/png');
       await deps.pool.execute(
         `UPDATE invite_token SET mini_program_code_file_key = ? WHERE invite_token_id = ?`,
@@ -618,47 +619,10 @@ async function createDailySnapshots(pool: Pool, recordDate: string): Promise<voi
   const [modules] = await pool.execute<RowDataPacket[]>(
     `SELECT module_id FROM life_module WHERE status IN ('active', 'pending_delete')`,
   );
-  const dayEnd = new Date(`${recordDate}T23:59:59.999+08:00`);
   for (const module of modules) {
     await inTransaction(pool, async (connection) => {
-      const [members] = await connection.execute<RowDataPacket[]>(
-        `SELECT member_instance_id, join_sequence FROM module_member
-          WHERE module_id = ? AND joined_at <= ? AND (left_at IS NULL OR left_at > ?)
-          ORDER BY join_sequence FOR UPDATE`,
-        [module.module_id, dayEnd, dayEnd],
-      );
-      const [records] = await connection.execute<RowDataPacket[]>(
-        `SELECT record_id, member_instance_id FROM life_record
-          WHERE module_id = ? AND record_date = ? AND status IN ('active', 'locked')`,
-        [module.module_id, recordDate],
-      );
-      const recordByMember = new Map(records.map((row) => [String(row.member_instance_id), String(row.record_id)]));
-      const completed = members.filter((member) => recordByMember.has(String(member.member_instance_id))).length;
-      await connection.execute(
-        `INSERT INTO daily_module_snapshot
-           (module_id, record_date, required_member_count, completed_member_count, is_all_completed,
-            calculation_version, calculated_at)
-         VALUES (?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(3))
-         ON DUPLICATE KEY UPDATE required_member_count = VALUES(required_member_count),
-           completed_member_count = VALUES(completed_member_count), is_all_completed = VALUES(is_all_completed),
-           calculation_version = calculation_version + 1, calculated_at = UTC_TIMESTAMP(3)`,
-        [module.module_id, recordDate, members.length, completed, members.length > 0 && completed === members.length],
-      );
-      const [snapshots] = await connection.execute<RowDataPacket[]>(
-        `SELECT snapshot_id FROM daily_module_snapshot WHERE module_id = ? AND record_date = ? FOR UPDATE`,
-        [module.module_id, recordDate],
-      );
-      const snapshotId = snapshots[0].snapshot_id;
-      await connection.execute('DELETE FROM daily_module_snapshot_member WHERE snapshot_id = ?', [snapshotId]);
-      for (const member of members) {
-        const recordId = recordByMember.get(String(member.member_instance_id)) ?? null;
-        await connection.execute(
-          `INSERT INTO daily_module_snapshot_member
-             (snapshot_id, member_instance_id, join_sequence_snapshot, has_effective_record, record_id)
-           VALUES (?, ?, ?, ?, ?)`,
-          [snapshotId, member.member_instance_id, member.join_sequence, Boolean(recordId), recordId],
-        );
-      }
+      await recalculateDailySnapshot(connection, String(module.module_id), recordDate);
+      await invalidateMonthlyMemoryCards(connection, String(module.module_id), recordDate.slice(0, 7));
     });
   }
 }

@@ -91,13 +91,24 @@
       <scroll-view scroll-y class="create-content">
         <input class="text-input" maxlength="10" value="{{createName}}" placeholder="模块名称" placeholder-class="text-placeholder" bindinput="onNameInput" />
         <textarea class="description-input" maxlength="200" value="{{createDescription}}" placeholder="介绍一下！" placeholder-class="text-placeholder" auto-height bindinput="onDescriptionInput" />
+        <view class="record-policy-heading"><text>记录模式</text><text>创建后不可修改</text></view>
+        <view class="record-policy-options">
+          <view class="record-policy-option {{createRecordPolicy === 'strict' ? 'record-policy-selected' : ''}}" data-policy="strict" bindtap="chooseRecordPolicy" hover-class="control-pressed" hover-stay-time="80" role="radio" aria-checked="{{createRecordPolicy === 'strict'}}">
+            <view class="record-policy-radio"><text></text></view>
+            <view><text class="record-policy-title">严厉模式</text><text class="record-policy-copy">当天直接记录；过去 3 天可补卡，多人模块需要审批。历史记录不可修改或删除。</text></view>
+          </view>
+          <view class="record-policy-option {{createRecordPolicy === 'relaxed' ? 'record-policy-selected' : ''}}" data-policy="relaxed" bindtap="chooseRecordPolicy" hover-class="control-pressed" hover-stay-time="80" role="radio" aria-checked="{{createRecordPolicy === 'relaxed'}}">
+            <view class="record-policy-radio"><text></text></view>
+            <view><text class="record-policy-title">轻松模式</text><text class="record-policy-copy">纯记录，无需审批。可记录、编辑或删除 1900-01-01 至 2099-12-31 内任意日期。</text></view>
+          </view>
+        </view>
         <view class="template-heading"><text>从模板开始</text></view>
         <view class="template-pills">
           <button class="template-pill {{selectedTemplateId === item.templateId ? 'template-selected' : ''}}" wx:for="{{templates}}" wx:key="templateId" data-id="{{item.templateId}}" bindtap="chooseTemplate">{{item.name}}</button>
         </view>
         <text wx:if="{{createError}}" class="form-error">{{createError}}</text>
       </scroll-view>
-      <button class="primary-button bottom-action-button create-submit" disabled="{{createSubmitting}}" loading="{{createSubmitting}}" bindtap="submitCreate">完成创建</button>
+      <button class="primary-button bottom-action-button create-submit" disabled="{{createSubmitting || !createRecordPolicy}}" loading="{{createSubmitting}}" bindtap="submitCreate">完成创建</button>
     </view>
   </view>
   </swiper-item>
