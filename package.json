@@ -33,13 +33,13 @@
     "verify:production": "npm run typecheck && npm run test && npm run build:production && node scripts/validate-project.mjs && node scripts/validate-production.mjs"
   },
   "devDependencies": {
-    "@types/node": "^22.20.1",
+    "@types/node": "^26.1.2",
     "@vitest/coverage-v8": "4.1.10",
-    "esbuild": "^0.25.0",
-    "lucide-static": "^1.24.0",
-    "miniprogram-api-typings": "^4.0.0",
+    "esbuild": "^0.28.1",
+    "lucide-static": "^1.28.0",
+    "miniprogram-api-typings": "^5.2.2",
     "sharp": "^0.35.3",
-    "typescript": "^5.8.0",
+    "typescript": "^7.0.2",
     "vitest": "4.1.10"
   },
   "allowScripts": {
