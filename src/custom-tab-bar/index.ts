@@ -14,10 +14,22 @@ Component({
     hidden: false,
     profileHasUnread: false,
     tabs: [
-      { pagePath: '/pages/home/index', text: '首页', icon: '/assets/ui/icons/house.svg' },
-      { pagePath: '/pages/memory/index', text: '回忆', icon: '/assets/ui/icons/sparkles.svg' },
-      { pagePath: '/pages/discover/index', text: '发现', icon: '/assets/ui/icons/compass.svg' },
-      { pagePath: '/pages/profile/index', text: '我的', icon: '/assets/ui/icons/user-round.svg' }
+      {
+        pagePath: '/pages/home/index',
+        text: '首页',
+      },
+      {
+        pagePath: '/pages/memory/index',
+        text: '回忆',
+      },
+      {
+        pagePath: '/pages/discover/index',
+        text: '发现',
+      },
+      {
+        pagePath: '/pages/profile/index',
+        text: '我的',
+      }
     ]
   },
   pageLifetimes: {

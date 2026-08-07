@@ -2,6 +2,7 @@ import 'dotenv/config';
 import mysql from 'mysql2/promise';
 
 const connection = await mysql.createConnection(databaseConfig(process.env));
+await connection.query("SET time_zone = '+08:00'");
 const checks = [
   {
     name: 'module_active_member_count',
@@ -69,5 +70,6 @@ function databaseConfig(environment) {
     password,
     database,
     charset: 'utf8mb4',
+    timezone: '+08:00',
   };
 }

@@ -29,7 +29,9 @@ describe('privacy-safe analytics tracker', () => {
 
     tracker.setTrackingConsent(true);
     tracker.track('app_open', { source: 'direct' });
-    expect(storage.get('notemylife.analytics.queue.v1')).toHaveLength(1);
+    const queue = storage.get('notemylife.analytics.queue.v1') as Array<{ occurredAt: string }>;
+    expect(queue).toHaveLength(1);
+    expect(queue[0].occurredAt).toMatch(/\+08:00$/);
     tracker.setTrackingConsent(false);
     expect(storage.get('notemylife.analytics.queue.v1')).toBeUndefined();
   });

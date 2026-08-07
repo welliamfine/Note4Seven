@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AppError } from '../lib/errors';
 import { asyncRoute, ok, parseBody } from '../lib/http';
 import { publicId } from '../lib/ids';
+import { isoWithShanghaiOffset } from '../lib/time';
 import { authUser } from '../middleware/auth';
 import { requireMember } from '../services/access';
 import { idempotent } from '../services/idempotency';
@@ -229,7 +230,7 @@ export function mediaRoutes(pool: Pool, storage: StorageService, onMediaQueued?:
       const [used] = await connection.execute<RowDataPacket[]>('SELECT record_id FROM life_record WHERE media_id = ? LIMIT 1', [mediaId]);
       if (used[0]) throw new AppError('MEDIA_IN_USE', '图片已被记录使用', 409);
       const [update] = await connection.execute<ResultSetHeader>(
-        `UPDATE media_asset SET status = 'abandoned', abandoned_at = UTC_TIMESTAMP(3), version = version + 1
+        `UPDATE media_asset SET status = 'abandoned', abandoned_at = CURRENT_TIMESTAMP(3), version = version + 1
           WHERE media_id = ? AND owner_user_id = ? AND status <> 'abandoned'`,
         [mediaId, user.userId],
       );
@@ -243,11 +244,10 @@ export function mediaRoutes(pool: Pool, storage: StorageService, onMediaQueued?:
 }
 
 async function mediaAssets(storage: StorageService, media: MediaRow) {
-  const expireAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  const exposeOriginal = media.purpose !== 'record_photo';
+  const expireAt = isoWithShanghaiOffset(new Date(Date.now() + 10 * 60 * 1000));
   const [originalUrl, detailThumbnailUrl, stickerUrl, stickerThumbnailUrl] = await Promise.all([
-    exposeOriginal && media.original_file_key ? storage.signedUrl(media.original_file_key) : null,
-    exposeOriginal && media.thumbnail_file_key ? storage.signedUrl(media.thumbnail_file_key) : null,
+    media.original_file_key ? storage.signedUrl(media.original_file_key) : null,
+    media.thumbnail_file_key ? storage.signedUrl(media.thumbnail_file_key) : null,
     media.sticker_file_key ? storage.signedUrl(media.sticker_file_key) : null,
     media.sticker_thumbnail_file_key ? storage.signedUrl(media.sticker_thumbnail_file_key) : null,
   ]);

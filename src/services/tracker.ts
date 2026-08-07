@@ -1,4 +1,5 @@
 import { RELEASE_ID, TARGET_ENVIRONMENT } from '../config/runtime';
+import { shanghaiNowIso } from '../utils/date';
 
 const CONSENT_KEY = 'notemylife.analytics.consent.v1';
 const QUEUE_KEY = 'notemylife.analytics.queue.v1';
@@ -76,7 +77,7 @@ export function track(eventName: string, properties: Record<string, unknown> = {
     eventName,
     schemaVersion: '1.1',
     documentBaseline: 'prd_6.4',
-    occurredAt: new Date().toISOString(),
+    occurredAt: shanghaiNowIso(),
     releaseId: RELEASE_ID,
     environment: TARGET_ENVIRONMENT,
     deviceType: deviceType(),

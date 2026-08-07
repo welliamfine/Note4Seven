@@ -15,6 +15,7 @@ import type { WechatService } from '../services/wechat';
 const createBody = z.object({
   recordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   mediaId: z.string(),
+  mediaVariant: z.enum(['sticker', 'original']).default('sticker'),
   remark: z.string().trim().max(500).default(''),
   clientRequestId: z.string().min(8).max(64),
 });
@@ -65,20 +66,20 @@ export function makeupRoutes(pool: Pool, wechat: WechatService): Router {
         const recordStatus = isSolo ? 'locked' : 'pending';
         const [recordInsert] = await connection.execute<ResultSetHeader>(
           `INSERT INTO life_record
-             (module_id, member_instance_id, user_id, record_date, source, status, media_id, remark,
+             (module_id, member_instance_id, user_id, record_date, source, status, media_id, media_variant, remark,
               display_name_snapshot, avatar_file_key_snapshot, join_sequence_snapshot, client_request_id,
               first_effective_at, approved_at, locked_at)
-           VALUES (?, ?, ?, ?, 'makeup', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [moduleId, access.member_instance_id, user.userId, body.recordDate, recordStatus, mediaId, body.remark || null,
+           VALUES (?, ?, ?, ?, 'makeup', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [moduleId, access.member_instance_id, user.userId, body.recordDate, recordStatus, mediaId, body.mediaVariant, body.remark || null,
             user.nickname, user.avatarFileKey, access.join_sequence, body.clientRequestId,
             isSolo ? now : null, isSolo ? now : null, isSolo ? now : null],
         );
         const recordId = String(recordInsert.insertId);
         await connection.execute(
           `INSERT INTO record_revision
-             (record_id, revision_no, media_id, remark, changed_by_user_id, change_type)
-           VALUES (?, 1, ?, ?, ?, 'create')`,
-          [recordId, mediaId, body.remark || null, user.userId],
+             (record_id, revision_no, media_id, media_variant, remark, changed_by_user_id, change_type)
+           VALUES (?, 1, ?, ?, ?, ?, 'create')`,
+          [recordId, mediaId, body.mediaVariant, body.remark || null, user.userId],
         );
 
         if (isSolo) {
@@ -183,17 +184,17 @@ function resolveApproval(pool: Pool, action: 'approve' | 'reject') {
       const status = action === 'approve' ? 'approved' : 'rejected';
       const [update] = await connection.execute<ResultSetHeader>(
         `UPDATE makeup_approval
-            SET status = ?, resolved_at = UTC_TIMESTAMP(3), resolved_by_user_id = ?,
+            SET status = ?, resolved_at = CURRENT_TIMESTAMP(3), resolved_by_user_id = ?,
                 resolved_by_member_instance_id = ?, version = version + 1
-          WHERE approval_id = ? AND status = 'pending' AND expire_at > UTC_TIMESTAMP(3)`,
+          WHERE approval_id = ? AND status = 'pending' AND expire_at > CURRENT_TIMESTAMP(3)`,
         [status, user.userId, access.member_instance_id, approvalId],
       );
       if (update.affectedRows !== 1) throw new AppError('APPROVAL_ALREADY_RESOLVED', '补卡申请已被其他成员处理', 409);
       if (action === 'approve') {
         await connection.execute(
           `UPDATE life_record
-              SET status = 'locked', approved_at = UTC_TIMESTAMP(3), locked_at = UTC_TIMESTAMP(3),
-                  first_effective_at = UTC_TIMESTAMP(3), version = version + 1
+              SET status = 'locked', approved_at = CURRENT_TIMESTAMP(3), locked_at = CURRENT_TIMESTAMP(3),
+                  first_effective_at = CURRENT_TIMESTAMP(3), version = version + 1
             WHERE record_id = ? AND status = 'pending'`,
           [approval.record_id],
         );
@@ -216,8 +217,8 @@ function resolveApproval(pool: Pool, action: 'approve' | 'reject') {
             SET type = 'makeup_result', title = '补卡已处理', content = ?,
                 action_type = 'none', action_status = 'none',
                 is_read = IF(user_id = ?, 1, 0),
-                read_at = IF(user_id = ?, COALESCE(read_at, UTC_TIMESTAMP(3)), NULL),
-                updated_at = UTC_TIMESTAMP(3)
+                read_at = IF(user_id = ?, COALESCE(read_at, CURRENT_TIMESTAMP(3)), NULL),
+                updated_at = CURRENT_TIMESTAMP(3)
           WHERE target_type = 'makeup_approval' AND target_id = ?`,
         [`「${user.nickname}」已${action === 'approve' ? '通过' : '拒绝'}该补卡申请`, user.userId, user.userId, approvalId],
       );
@@ -225,7 +226,7 @@ function resolveApproval(pool: Pool, action: 'approve' | 'reject') {
         `UPDATE module_inbox_item
             SET type = 'makeup_result', title = '补卡已处理', content = ?,
                 status = IF(recipient_user_id = ?, 'read', 'unread'),
-                updated_at = UTC_TIMESTAMP(3), expire_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 7 DAY)
+                updated_at = CURRENT_TIMESTAMP(3), expire_at = DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 7 DAY)
           WHERE target_type = 'makeup_approval' AND target_id = ?`,
         [`「${user.nickname}」已${action === 'approve' ? '通过' : '拒绝'}该补卡申请`, user.userId, approvalId],
       );
@@ -234,7 +235,7 @@ function resolveApproval(pool: Pool, action: 'approve' | 'reject') {
            (module_id, recipient_user_id, type, title, content, target_type, target_id, record_date,
             status, dedupe_key, expire_at)
          VALUES (?, ?, 'makeup_result', ?, ?, 'record', ?, ?, 'unread', ?,
-                 DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 7 DAY))`,
+                 DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 7 DAY))`,
         [approval.module_id, approval.applicant_user_id,
           action === 'approve' ? '补卡已通过' : '补卡未通过',
           action === 'approve' ? '你的补卡记录已经生效' : '本次补卡申请被拒绝',

@@ -902,6 +902,74 @@
         }
       }
     },
+    "/api/v1/memories/collage": {
+      "get": {
+        "operationId": "get_api_v1_memories_collage",
+        "tags": [
+          "v1"
+        ],
+        "summary": "GET /api/v1/memories/collage",
+        "x-source": "src/routes/views.ts",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_v1_memories_collage",
+        "tags": [
+          "v1"
+        ],
+        "summary": "PUT /api/v1/memories/collage",
+        "x-source": "src/routes/views.ts",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/v1/memories/monthly-card": {
       "get": {
         "operationId": "get_api_v1_memories_monthly_card",
@@ -979,6 +1047,41 @@
           "v1"
         ],
         "summary": "POST /api/v1/memories/monthly-card/export",
+        "x-source": "src/routes/views.ts",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/memories/overview": {
+      "get": {
+        "operationId": "get_api_v1_memories_overview",
+        "tags": [
+          "v1"
+        ],
+        "summary": "GET /api/v1/memories/overview",
         "x-source": "src/routes/views.ts",
         "parameters": [],
         "responses": {
@@ -1260,6 +1363,50 @@
         ],
         "summary": "GET /api/v1/modules/{moduleId}/calendar",
         "x-source": "src/routes/records.ts",
+        "parameters": [
+          {
+            "name": "moduleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/modules/{moduleId}/checkin-notification-subscription": {
+      "put": {
+        "operationId": "put_api_v1_modules_moduleId_checkin_notification_subscription",
+        "tags": [
+          "v1"
+        ],
+        "summary": "PUT /api/v1/modules/{moduleId}/checkin-notification-subscription",
+        "x-source": "src/routes/views.ts",
         "parameters": [
           {
             "name": "moduleId",
@@ -2146,6 +2293,284 @@
         }
       }
     },
+    "/api/v1/modules/{moduleId}/streak-rewards": {
+      "get": {
+        "operationId": "get_api_v1_modules_moduleId_streak_rewards",
+        "tags": [
+          "v1"
+        ],
+        "summary": "GET /api/v1/modules/{moduleId}/streak-rewards",
+        "x-source": "src/routes/streak-rewards.ts",
+        "parameters": [
+          {
+            "name": "moduleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_v1_modules_moduleId_streak_rewards",
+        "tags": [
+          "v1"
+        ],
+        "summary": "POST /api/v1/modules/{moduleId}/streak-rewards",
+        "x-source": "src/routes/streak-rewards.ts",
+        "parameters": [
+          {
+            "name": "moduleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/modules/{moduleId}/streak-rewards/{rewardRuleId}": {
+      "delete": {
+        "operationId": "delete_api_v1_modules_moduleId_streak_rewards_rewardRuleId",
+        "tags": [
+          "v1"
+        ],
+        "summary": "DELETE /api/v1/modules/{moduleId}/streak-rewards/{rewardRuleId}",
+        "x-source": "src/routes/streak-rewards.ts",
+        "parameters": [
+          {
+            "name": "moduleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rewardRuleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/modules/{moduleId}/streak-rewards/{rewardRuleId}/preview": {
+      "post": {
+        "operationId": "post_api_v1_modules_moduleId_streak_rewards_rewardRuleId_preview",
+        "tags": [
+          "v1"
+        ],
+        "summary": "POST /api/v1/modules/{moduleId}/streak-rewards/{rewardRuleId}/preview",
+        "x-source": "src/routes/streak-rewards.ts",
+        "parameters": [
+          {
+            "name": "moduleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rewardRuleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/modules/{moduleId}/streak-rewards/pending": {
+      "get": {
+        "operationId": "get_api_v1_modules_moduleId_streak_rewards_pending",
+        "tags": [
+          "v1"
+        ],
+        "summary": "GET /api/v1/modules/{moduleId}/streak-rewards/pending",
+        "x-source": "src/routes/streak-rewards.ts",
+        "parameters": [
+          {
+            "name": "moduleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/modules/{moduleId}/streak-rewards/received": {
+      "get": {
+        "operationId": "get_api_v1_modules_moduleId_streak_rewards_received",
+        "tags": [
+          "v1"
+        ],
+        "summary": "GET /api/v1/modules/{moduleId}/streak-rewards/received",
+        "x-source": "src/routes/streak-rewards.ts",
+        "parameters": [
+          {
+            "name": "moduleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/v1/modules/recycle-bin": {
       "get": {
         "operationId": "get_api_v1_modules_recycle_bin",
@@ -2713,6 +3138,50 @@
         "parameters": [
           {
             "name": "recordId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/streak-reward-draws/{drawId}/reveal": {
+      "post": {
+        "operationId": "post_api_v1_streak_reward_draws_drawId_reveal",
+        "tags": [
+          "v1"
+        ],
+        "summary": "POST /api/v1/streak-reward-draws/{drawId}/reveal",
+        "x-source": "src/routes/streak-rewards.ts",
+        "parameters": [
+          {
+            "name": "drawId",
             "in": "path",
             "required": true,
             "schema": {

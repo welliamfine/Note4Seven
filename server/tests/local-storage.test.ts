@@ -27,7 +27,9 @@ describe('local development storage', () => {
     const key = 'media/1/2/original.png';
     const body = Buffer.from('local-image');
 
-    await expect(storage.createUpload(key)).resolves.toMatchObject({ method: 'LOCAL', cloudPath: key });
+    const upload = await storage.createUpload(key);
+    expect(upload).toMatchObject({ method: 'LOCAL', cloudPath: key });
+    expect(upload.expireAt).toMatch(/\+08:00$/);
     await storage.writeUpload(key, body);
     await expect(storage.assertUploaded(key, body.length)).resolves.toBeUndefined();
     await expect(storage.readObject(key)).resolves.toMatchObject({ body, contentType: 'image/png' });

@@ -4,11 +4,11 @@
   <scroll-view class="beta-scroll content-layer" scroll-y enhanced show-scrollbar="{{false}}"><view class="beta-body">
     <view wx:if="{{loading}}" class="beta-loading">正在加载...</view>
     <block wx:elif="{{view}}">
-      <text class="beta-section-title">基础信息</text><view class="settings-form beta-glass"><input class="beta-input" value="{{name}}" maxlength="10" bindinput="onName" disabled="{{view.currentRole !== 'creator'}}" /><textarea class="beta-textarea" value="{{description}}" maxlength="200" auto-height bindinput="onDescription" disabled="{{view.currentRole !== 'creator'}}" /><button wx:if="{{view.currentRole === 'creator'}}" class="beta-secondary save-info" loading="{{saving}}" bindtap="save">保存基础信息</button></view>
-      <text class="beta-section-title">记录模式</text>
+      <text class="beta-section-title">基础信息</text><view class="settings-form beta-glass"><input class="beta-input" value="{{name}}" maxlength="-1" bindinput="onName" disabled="{{view.currentRole !== 'creator'}}" /><textarea class="beta-textarea" value="{{description}}" maxlength="200" auto-height bindinput="onDescription" disabled="{{view.currentRole !== 'creator'}}" /><button wx:if="{{view.currentRole === 'creator'}}" class="beta-secondary save-info" loading="{{saving}}" bindtap="save">保存基础信息</button></view>
+      <text class="beta-section-title">模式选择</text>
       <view class="record-policy-readonly beta-glass">
-        <view><text class="record-policy-name">{{view.module.recordPolicy === 'relaxed' ? '轻松模式' : '严厉模式'}}</text><text class="record-policy-lock">创建后不可修改</text></view>
-        <text class="record-policy-description">{{view.module.recordPolicy === 'relaxed' ? '可在 1900-01-01 至 2099-12-31 内任意日期直接记录，并可编辑或删除自己的记录。未来记录到当天才计入统计。' : '当天直接记录；过去 3 天可补卡，多人模块需要审批。历史记录不可修改或删除。'}}</text>
+        <view class="record-policy-summary"><text class="record-policy-name">{{view.module.recordPolicy === 'relaxed' ? '记录模式' : '打卡模式'}}</text><text class="record-policy-lock">创建后不可修改</text></view>
+        <text class="record-policy-description">{{view.module.recordPolicy === 'relaxed' ? '只为记录，轻松不设限~' : '严格限制打卡补卡时间，督促记录！'}}</text>
       </view>
       <text class="beta-section-title">个人提醒</text>
       <view class="reminder-card beta-glass">
@@ -16,6 +16,11 @@
         <picker mode="time" value="{{reminderTime}}" bindchange="onReminderTime"><view class="reminder-row"><view><text>提醒时间</text></view><text class="reminder-value">{{reminderTime}}</text></view></picker>
         <view class="reminder-row"><view><text>小程序内提醒</text></view><switch checked="{{inAppEnabled}}" color="#e3ada9" bindchange="onInAppEnabled" /></view>
         <view class="reminder-row subscription-reminder-row" bindtap="explainExternalReminder"><view><text>微信订阅提醒</text></view><text class="settings-arrow">›</text></view>
+        <view wx:if="{{view.module.mode === 'group'}}" class="reminder-row checkin-notification-row">
+          <view><text>成员打卡通知</text><text class="checkin-notification-status">可接收 {{checkinNotificationCredits}} 条</text></view>
+          <switch checked="{{checkinNotificationsEnabled}}" disabled="{{checkinNotificationSaving}}" color="#e3ada9" bindchange="onCheckinNotificationsEnabled" />
+        </view>
+        <button wx:if="{{view.module.mode === 'group' && checkinNotificationsEnabled}}" class="checkin-notification-renew" loading="{{checkinNotificationSaving}}" disabled="{{checkinNotificationSaving}}" bindtap="renewCheckinNotifications">续订 1 条</button>
         <button class="beta-secondary reminder-save" loading="{{reminderSaving}}" bindtap="saveReminder">保存提醒</button>
       </view>
       <text class="beta-section-title">成员与邀请</text><view class="settings-list beta-glass"><view class="beta-row settings-option-row" bindtap="openInvite"><text class="settings-option-title">邀请成员</text><text class="settings-arrow">›</text></view></view>

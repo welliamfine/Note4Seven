@@ -7,8 +7,8 @@
     <view class="module-heading">
       <view class="round-icon" bindtap="goBack" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="返回"><image src="/assets/ui/icons/chevron-left.svg" /></view>
       <view class="module-copy"><text class="detail-module-name">{{module.name}}</text><text class="module-description">{{module.members.length}}人 · {{module.description || '一起认真记录生活'}}</text></view>
-      <button class="round-icon detail-share" open-type="share" disabled="{{module.members.length >= 4}}" bindtap="shareModuleTap" hover-class="control-pressed" hover-stay-time="80" aria-label="分享邀请"><image src="/assets/ui/icons/share-2.svg" /></button>
-      <view class="round-icon" bindtap="openSettings" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="模块设置"><image src="/assets/ui/icons/settings-2.svg" /></view>
+      <button class="round-icon detail-share" open-type="share" disabled="{{module.members.length >= 4}}" bindtap="shareModuleTap" hover-class="control-pressed" hover-stay-time="80" aria-label="分享邀请"><view class="state-icon detail-action-icon"><image class="state-icon-sprite" src="/subpackages/assets/ui/custom-icons/detail-share.png" mode="scaleToFill" /></view></button>
+      <view class="round-icon" bindtap="openSettings" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="模块设置"><view class="state-icon detail-action-icon"><image class="state-icon-sprite" src="/subpackages/assets/ui/custom-icons/detail-manage.png" mode="scaleToFill" /></view></view>
     </view>
 
     <scroll-view scroll-y="{{!memberCalendarOpen}}" class="detail-main-scroll" enhanced show-scrollbar="{{false}}">
@@ -35,7 +35,7 @@
             </view>
             <view class="calendar-nav-button" bindtap="nextMonth" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="下个月"><image src="/assets/ui/icons/chevron-right.svg" /></view>
           </view>
-          <view wx:if="{{memberCalendarOpen}}" class="member-calendar-popover-position" catchtap="stopPropagation" catchtouchstart="stopPropagation" catchtouchmove="stopPropagation" catchtouchend="stopPropagation" catchtouchcancel="stopPropagation">
+          <view wx:if="{{memberCalendarOpen}}" class="member-calendar-popover-position" catchtap="stopPropagation">
             <view class="member-calendar-popover {{memberCalendarClosing ? 'member-calendar-popover-closing' : ''}}">
               <swiper class="member-calendar-swiper" style="height: {{memberCalendars[0].rowCount === 6 ? 624 : 540}}rpx;" current="{{memberCalendarIndex}}" circular="{{memberCalendars.length > 1}}" duration="260" easing-function="easeOutCubic" bindchange="onMemberCalendarChange">
                 <swiper-item wx:for="{{memberCalendars}}" wx:for-item="memberCalendar" wx:key="memberInstanceId">
@@ -75,9 +75,10 @@
           </view>
         </view>
 
-        <view class="quick-actions">
-          <button bindtap="openTodo"><image src="/assets/ui/icons/list-todo.svg" /><view><text class="quick-title">待办</text><text class="quick-copy">{{todoCount ? todoCount + '项待处理' : '暂无待办'}}</text></view><text wx:if="{{todoCount > 0}}" class="todo-badge {{todoBadgePhase}}">{{todoCount}}</text></button>
-          <button bindtap="openGallery"><view class="gallery-preview-position"><view class="sticker-pop-wrapper {{galleryHasSticker ? (monthStickerPhase === 'sticker-leaving' && !galleryExitVisible ? 'sticker-hidden' : monthStickerPhase) : 'sticker-hidden'}}" style="animation-delay: {{monthStickerPhase === 'sticker-entering' ? galleryStickerDelay : 0}}ms;"><image class="gallery-preview-content sticker-outline-small" src="{{galleryCover}}" mode="aspectFit" webp /></view></view><view><text class="quick-title">图片展示</text><text class="quick-copy">查看合集</text></view></button>
+        <view class="quick-actions {{module.recordPolicy === 'strict' ? 'quick-actions-three' : ''}}">
+          <button bindtap="openTodo" hover-class="icon-button-selected" hover-stay-time="80"><view class="state-icon quick-action-icon"><image class="state-icon-sprite" src="/subpackages/assets/ui/custom-icons/module-todo.png" mode="scaleToFill" /></view><view><text class="quick-title">通知</text><text class="quick-copy">{{todoCount ? todoCount + '项待处理' : '暂无待办'}}</text></view><text wx:if="{{todoCount > 0}}" class="todo-badge {{todoBadgePhase}}">{{todoCount}}</text></button>
+          <button wx:if="{{module.recordPolicy === 'strict'}}" bindtap="openRewardSettings" hover-class="icon-button-selected" hover-stay-time="80"><view class="state-icon quick-action-icon"><image class="state-icon-sprite" src="/subpackages/assets/ui/custom-icons/reward-gift.png" mode="scaleToFill" /></view><view><text class="quick-title">彩蛋</text><text class="quick-copy">彩蛋设置</text></view></button>
+          <button bindtap="openGallery"><view class="gallery-preview-position"><view class="sticker-pop-wrapper {{galleryHasSticker ? (monthStickerPhase === 'sticker-leaving' && !galleryExitVisible ? 'sticker-hidden' : monthStickerPhase) : 'sticker-hidden'}}" style="animation-delay: {{monthStickerPhase === 'sticker-entering' ? galleryStickerDelay : 0}}ms;"><image class="gallery-preview-content sticker-outline-small" src="{{galleryCover}}" mode="aspectFit" webp /></view></view><view><text class="quick-title">合集</text><text class="quick-copy">查看合集</text></view></button>
         </view>
 
         <view class="month-stats" bindtap="openMemory">
@@ -130,7 +131,16 @@
             <view wx:if="{{editorMediaProgress > 0 && editorMediaProgress < 100}}" class="progress-track"><view style="width:{{editorMediaProgress}}%;"></view></view>
             <view wx:else class="processing-dots"><text></text><text></text><text></text></view>
           </view>
-          <view wx:if="{{editorMediaStatus === 'ready'}}" class="ready-view"><view class="ready-sticker-motion"><view class="sticker-pop-wrapper {{editorStickerPhase}}"><image class="ready-sticker sticker-outline-large" src="{{editorStickerPath}}" mode="aspectFit" webp bindload="onEditorStickerLoad" binderror="onEditorStickerLoadError" /></view></view><view class="replace-pill"><image src="/assets/ui/icons/refresh-cw.svg" /><text>换一张</text></view></view>
+          <view wx:if="{{editorMediaStatus === 'ready'}}" class="ready-view">
+            <view class="ready-sticker-motion {{editorMediaVariant === 'original' ? 'ready-original-frame' : ''}}">
+              <view wx:if="{{editorMediaVariant === 'sticker'}}" class="sticker-pop-wrapper {{editorStickerPhase}}"><image class="ready-sticker sticker-outline-large" src="{{editorStickerPath}}" mode="aspectFit" webp bindload="onEditorStickerLoad" binderror="onEditorStickerLoadError" /></view>
+              <image wx:else class="ready-original" src="{{editorOriginalPath}}" mode="aspectFit" />
+            </view>
+            <view class="ready-media-actions">
+              <view class="replace-pill" catchtap="toggleEditorMediaVariant" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="切换原图或贴纸"><image src="/assets/ui/icons/image.svg" /><text>{{editorMediaVariant === 'sticker' ? '原图' : '贴纸'}}</text></view>
+              <view class="replace-pill" catchtap="openPhotoSource" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="更换照片"><image src="/assets/ui/icons/refresh-cw.svg" /><text>换一张</text></view>
+            </view>
+          </view>
           <view wx:if="{{editorMediaStatus === 'failed'}}" class="photo-placeholder failed-view"><text>{{editorMediaErrorTitle}}</text><text>{{editorMediaError}}</text></view>
         </view>
         <button wx:if="{{editorMediaStatus === 'failed' && (editorMediaRetryable || editorOriginalPath)}}" class="retry-button" bindtap="retryMedia">重新生成</button>
@@ -148,6 +158,149 @@
       <text class="source-title">添加照片</text>
       <button data-source="camera" bindtap="choosePhoto"><image src="/assets/ui/icons/camera.svg" /><text>拍照</text></button>
       <button data-source="album" bindtap="choosePhoto"><image src="/assets/ui/icons/image.svg" /><text>从相册选择</text></button>
+    </view>
+  </view>
+
+  <view wx:if="{{rewardSettingsOpen}}" class="sheet-overlay reward-settings-overlay sheet-motion-overlay {{rewardSettingsClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeRewardSettings">
+    <view class="editor-sheet reward-settings-sheet safe-bottom sheet-motion-panel {{rewardSettingsClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation">
+      <view class="sheet-handle"></view>
+      <view class="editor-heading">
+        <view class="reward-sheet-title-row">
+          <text class="editor-title">设置奖励彩蛋</text>
+        </view>
+        <view class="sheet-close" bindtap="closeRewardSettings" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="关闭"><image src="/assets/ui/icons/x.svg" /></view>
+      </view>
+
+      <scroll-view scroll-y class="editor-content reward-settings-content" enhanced show-scrollbar="{{false}}">
+          <view class="reward-shortcuts">
+            <button class="reward-list-button" bindtap="showRewardRuleList" hover-class="icon-button-selected" hover-stay-time="80"><view class="state-icon reward-shortcut-icon"><image class="state-icon-sprite" src="/subpackages/assets/ui/custom-icons/reward-rules.png" mode="scaleToFill" /></view><text>我设定的彩蛋</text><view class="reward-list-meta"><text>{{rewardRules.length}}</text><image src="/assets/ui/icons/chevron-right.svg" /></view></button>
+            <button class="reward-list-button" bindtap="openRewardCollection" hover-class="icon-button-selected" hover-stay-time="80"><view class="state-icon reward-shortcut-icon"><image class="state-icon-sprite" src="/subpackages/assets/ui/custom-icons/reward-gift.png" mode="scaleToFill" /></view><text>我收到的彩蛋</text><view class="reward-list-meta"><image src="/assets/ui/icons/chevron-right.svg" /></view></button>
+          </view>
+
+          <text class="reward-field-label">达成条件</text>
+          <view class="reward-condition-row">
+            <picker class="reward-condition-picker" range="{{rewardTargetOptions}}" range-key="label" value="{{rewardTargetIndex}}" bindchange="onRewardTarget">
+              <view class="reward-input-box"><text>{{rewardTargetOptions[rewardTargetIndex].label}}</text><image src="/assets/ui/icons/chevron-down.svg" /></view>
+            </picker>
+            <view class="reward-days-box"><input type="number" maxlength="3" value="{{rewardStreakDays}}" bindinput="onRewardStreakDays" /><text>天</text></view>
+          </view>
+
+          <text class="reward-field-label">真实礼物</text>
+          <input class="reward-text-input" value="{{rewardPrizeTitle}}" maxlength="20" placeholder="例如：一杯奶茶" placeholder-class="text-placeholder" bindinput="onRewardPrizeTitle" />
+          <textarea class="reward-textarea" value="{{rewardPrizeDescription}}" maxlength="80" placeholder="写下规格、兑换方式或一句祝福" placeholder-class="text-placeholder" auto-height bindinput="onRewardPrizeDescription" />
+
+          <text class="reward-field-label">奖励封面 <text class="reward-field-optional">选填</text></text>
+          <view class="reward-cover-upload" bindtap="chooseRewardCover" role="button" aria-label="上传奖励封面">
+            <image class="reward-cover-preview sticker-outline" src="{{rewardCoverPath}}" mode="aspectFit" webp />
+            <view class="reward-cover-copy">
+              <text>{{rewardCoverStatus === 'processing' ? '正在生成贴纸 ' + rewardCoverProgress + '%' : rewardCoverStatus === 'ready' ? '已使用你的贴纸封面' : '上传图片'}}</text>
+              <text>{{rewardCoverStatus === 'failed' ? '处理失败，点击重试' : '未上传时使用默认贴纸'}}</text>
+            </view>
+            <image class="reward-cover-upload-icon" src="/assets/ui/icons/image.svg" />
+          </view>
+          <button wx:if="{{rewardCoverMediaId}}" class="reward-cover-reset" bindtap="resetRewardCover">恢复默认封面</button>
+
+          <text class="reward-field-label">抽中概率</text>
+          <view class="reward-probabilities">
+            <view wx:for="{{[20, 50, 80, 100]}}" wx:key="*this" class="{{rewardProbability === item ? 'reward-probability-active' : ''}}" data-probability="{{item}}" bindtap="chooseRewardProbability">{{item}}%</view>
+          </view>
+
+          <checkbox-group bindchange="onRewardAgreement">
+            <label class="reward-agreement"><checkbox value="accepted" checked="{{rewardAgreement}}" color="#d99c98" /><text>我确认由自己承诺并线下兑现，平台不提供购买或担保</text></label>
+          </checkbox-group>
+          <text class="reward-expiry">设置后90天内有效 · 每位达成人独立抽取</text>
+      </scroll-view>
+
+      <button class="primary-button bottom-action-button editor-submit" loading="{{rewardSaving}}" disabled="{{rewardSaving}}" bindtap="saveRewardRule">藏好这份奖励</button>
+    </view>
+  </view>
+
+  <view wx:if="{{rewardSettingsOpen && rewardSettingsMode === 'list'}}" class="sheet-overlay reward-settings-overlay reward-rule-list-overlay sheet-motion-overlay {{rewardRuleListClosing ? 'sheet-motion-closing' : ''}}" bindtap="showRewardRuleForm">
+    <view class="editor-sheet reward-settings-sheet safe-bottom sheet-motion-panel {{rewardRuleListClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation">
+      <view class="sheet-handle"></view>
+      <view class="editor-heading">
+        <view class="reward-sheet-title-row">
+          <view class="reward-back" bindtap="showRewardRuleForm" role="button" aria-label="返回设置"><image src="/assets/ui/icons/chevron-left.svg" /></view>
+          <text class="editor-title">已设定的彩蛋</text>
+        </view>
+        <view class="sheet-close" bindtap="closeRewardSettings" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="关闭"><image src="/assets/ui/icons/x.svg" /></view>
+      </view>
+
+      <scroll-view scroll-y class="editor-content reward-settings-content" enhanced show-scrollbar="{{false}}">
+        <view wx:if="{{!rewardRules.length}}" class="reward-list-empty"><image src="/assets/ui/icons/sparkles.svg" /><text>还没有设置彩蛋</text></view>
+        <view wx:for="{{rewardRules}}" wx:key="rewardRuleId" class="reward-rule-item">
+          <view class="reward-rule-heading"><view><text class="reward-rule-target">{{item.targetLabel}} · {{item.conditionLabel}}</text><text class="reward-rule-prize">{{item.prizeTitle}} · {{item.winProbability}}%</text></view><text class="reward-rule-status reward-rule-status-{{item.status}}">{{item.statusLabel}}</text></view>
+          <text wx:if="{{item.progressLabel}}" class="reward-rule-progress">{{item.progressLabel}}</text>
+          <view wx:if="{{item.status === 'active'}}" class="reward-rule-actions">
+            <button class="reward-row-button" data-rule-id="{{item.rewardRuleId}}" loading="{{rewardPreviewingId === item.rewardRuleId}}" disabled="{{rewardPreviewingId || rewardCancellingId}}" bindtap="previewRewardRule">预览</button>
+            <button class="reward-row-button reward-row-danger" data-rule-id="{{item.rewardRuleId}}" loading="{{rewardCancellingId === item.rewardRuleId}}" disabled="{{rewardPreviewingId || rewardCancellingId}}" bindtap="cancelRewardRule">取消</button>
+          </view>
+        </view>
+      </scroll-view>
+
+      <button class="primary-button bottom-action-button editor-submit" bindtap="showRewardRuleForm">再设一个彩蛋</button>
+    </view>
+  </view>
+
+  <view wx:if="{{rewardOpen && pendingReward}}" class="reward-overlay reward-motion-{{rewardMotionPhase}}" style="--reward-entry-duration:{{rewardMotion.entryDuration}}ms;--reward-flip-duration:{{rewardMotion.flipDuration}}ms;--reward-advance-duration:{{rewardMotion.advanceDuration}}ms;--reward-close-duration:{{rewardMotion.closeDuration}}ms;--reward-collect-duration:{{rewardMotion.collectDuration}}ms;" catchtouchmove="stopPropagation" bindtap="closeReward">
+    <view wx:if="{{rewardCardFlipped || rewardBatchResults.length}}" class="reward-effects" aria-hidden="true">
+      <view class="reward-effect-position reward-rays-position"><image class="reward-effect-image reward-rays" src="/subpackages/reward-assets/reward-rays.svg" mode="scaleToFill" /></view>
+      <view class="reward-ribbon-position reward-ribbon-left-position"><image class="reward-effect-image reward-ribbon reward-ribbon-left" src="/subpackages/reward-assets/reward-ribbon-left.svg" mode="scaleToFill" /></view>
+      <view class="reward-ribbon-position reward-ribbon-right-position"><image class="reward-effect-image reward-ribbon reward-ribbon-right" src="/subpackages/reward-assets/reward-ribbon-right.svg" mode="scaleToFill" /></view>
+      <view class="reward-effect-position reward-confetti-position"><image class="reward-effect-image reward-confetti" src="/subpackages/reward-assets/reward-confetti.svg" mode="scaleToFill" /></view>
+    </view>
+    <view class="reward-dialog" catchtap="stopPropagation">
+      <view class="reward-dialog-close" bindtap="closeReward" role="button" aria-label="关闭"><image src="/assets/ui/icons/x.svg" /></view>
+      <text wx:if="{{rewardPreviewResult}}" class="reward-preview-badge">奖励预演</text>
+      <text wx:elif="{{rewardPendingCount > 1 && !rewardBatchResults.length}}" class="reward-preview-badge">{{rewardPendingCount}} 张彩蛋等你拆</text>
+
+      <view wx:if="{{rewardBatchResults.length}}" class="reward-batch-panel">
+        <text class="reward-batch-title">你的彩蛋都拆开了</text>
+        <scroll-view scroll-y class="reward-batch-scroll" enhanced show-scrollbar="{{false}}">
+          <view class="reward-batch-grid">
+            <view wx:for="{{rewardBatchResults}}" wx:key="rewardDrawId" class="reward-mini-card">
+              <image class="reward-card-texture" src="/subpackages/reward-assets/card-texture.webp" mode="aspectFill" />
+              <text class="reward-mini-kicker">{{item.resultType === 'gift' ? '惊喜礼物' : item.streakDays + '日纪念贴'}}</text>
+              <image class="reward-mini-image sticker-outline-medium" src="{{item.resultType === 'gift' ? (item.coverPath || '/subpackages/reward-assets/default-cover.png') : (item.stickerPath || '/subpackages/reward-assets/default-cover.png')}}" mode="aspectFit" webp />
+              <text class="reward-mini-title">{{item.prizeTitle}}</text>
+              <text class="reward-mini-from">来自 {{item.sponsorName}}</text>
+            </view>
+          </view>
+        </scroll-view>
+        <button class="reward-open-button reward-finish-button" disabled="{{rewardOpening}}" bindtap="collectReward">收下全部</button>
+      </view>
+
+      <view wx:else class="reward-card-stack {{rewardPendingCount > 1 ? 'reward-card-stack-multiple' : ''}}">
+        <view wx:if="{{rewardPendingCount > 1}}" class="reward-stack-card reward-stack-card-left"></view>
+        <view wx:if="{{rewardPendingCount > 2}}" class="reward-stack-card reward-stack-card-right"></view>
+        <view class="reward-card-scene">
+        <view class="reward-card {{rewardCardFlipped ? 'reward-card-flipped' : ''}}">
+          <view class="reward-card-face reward-card-sealed">
+            <image class="reward-card-texture" src="/subpackages/reward-assets/card-texture.webp" mode="aspectFill" />
+            <text class="reward-brand-name brand-script">Note4Seven</text>
+            <text class="reward-sealed-copy">一枚悄悄藏好的彩蛋</text>
+            <view class="reward-sealed-divider"></view>
+            <view class="reward-sponsor-chip"><view class="reward-sponsor-avatar">{{pendingReward.sponsorName[0]}}</view><view><text>来自</text><text>{{pendingReward.sponsorName}}</text></view></view>
+            <button class="reward-card-open" loading="{{rewardOpening}}" disabled="{{rewardOpening || rewardMotionPhase === 'entering'}}" bindtap="revealReward">点击查看</button>
+          </view>
+          <view class="reward-card-face reward-card-result">
+            <image class="reward-card-texture" src="/subpackages/reward-assets/card-texture.webp" mode="aspectFill" />
+            <view class="reward-code-row"><text>•••</text><text>NOTE4SEVEN · {{pendingReward.streakDays}} DAY</text><text>•••</text></view>
+            <block wx:if="{{revealedReward}}">
+              <text class="reward-result-kicker">{{revealedReward.resultType === 'gift' ? '来自' + revealedReward.sponsorName + '的礼物' : pendingReward.streakDays + '日纪念贴'}}</text>
+              <image class="reward-result-sticker sticker-outline-large" src="{{revealedReward.resultType === 'gift' ? (revealedReward.coverPath || '/subpackages/reward-assets/default-cover.png') : (revealedReward.stickerPath || '/subpackages/reward-assets/default-cover.png')}}" mode="aspectFit" webp />
+              <text class="reward-result-title">{{revealedReward.prizeTitle}}</text>
+              <text wx:if="{{revealedReward.resultType === 'sticker' && revealedReward.stickerMemberName}}" class="reward-result-source">来自{{revealedReward.stickerMemberName}}在{{revealedReward.stickerRecordDate}}的打卡</text>
+              <text class="reward-result-description">{{revealedReward.stickerRemark || revealedReward.prizeDescription}}</text>
+              <text class="reward-result-date">{{rewardDateRange}}</text>
+            </block>
+          </view>
+        </view>
+      </view>
+      </view>
+      <button wx:if="{{!rewardCardFlipped && rewardPendingCount > 1 && !rewardPreviewResult && !rewardBatchResults.length}}" class="reward-open-button" loading="{{rewardOpening}}" disabled="{{rewardOpening || rewardMotionPhase === 'entering'}}" bindtap="revealAllRewards">一键翻转全部</button>
+      <text wx:if="{{!rewardCardFlipped && rewardPendingCount > 1 && !rewardPreviewResult && !rewardBatchResults.length}}" class="reward-stack-tip">也可以逐张点击查看</text>
+      <button wx:if="{{rewardCardFlipped}}" class="reward-open-button reward-finish-button" disabled="{{rewardOpening}}" bindtap="acceptReward">{{rewardPendingIndex + 1 < rewardPendingCount ? '继续拆下一张' : '收下'}}</button>
     </view>
   </view>
 </view>

@@ -12,6 +12,9 @@ import { LocalStorageService } from './services/local-storage';
 import { StorageService } from './services/storage';
 import { WechatService } from './services/wechat';
 import { MetricsRegistry } from './observability/metrics';
+import { BEIJING_TIME_ZONE } from './lib/time';
+
+process.env.TZ = BEIJING_TIME_ZONE;
 
 async function main(): Promise<void> {
   const config = loadConfig();

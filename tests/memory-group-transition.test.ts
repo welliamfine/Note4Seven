@@ -29,7 +29,9 @@ describe('memory group transition', () => {
     vi.useFakeTimers();
     api.getMemoryView.mockReset();
     vi.stubGlobal('wx', {
-      getImageInfo: vi.fn(),
+      getImageInfo: vi.fn(({ src, success }: { src: string; success?: () => void }) => {
+        if (src !== '/new.png') success?.();
+      }),
     });
     vi.stubGlobal('Page', (definition: PageDefinition) => { pageDefinition = definition; });
     await import('../src/pages/memory/index');
@@ -47,7 +49,8 @@ describe('memory group transition', () => {
     const page = createPage();
     Object.assign(page.data, {
       moduleId: 'module_1',
-      month: '2026-07',
+      reportMode: 'month',
+      periodKey: '2026-07',
       stickers: [{ id: 'old_record', path: '/old.png', popDelay: 0 }],
       stickerPhase: 'sticker-visible',
     });
@@ -57,30 +60,46 @@ describe('memory group transition', () => {
     expect(page.data.stickerPhase).toBe('sticker-visible');
 
     finishRequest({
+      reportMode: 'month',
+      periodKey: '2026-07',
+      periodStart: '2026-07-01',
+      periodEnd: '2026-07-31',
+      isCurrentPeriod: false,
       month: '2026-07',
       moduleId: 'module_1',
       moduleName: 'Daily',
       modules: [{ moduleId: 'module_1', name: 'Daily' }],
+      momentCount: 4,
+      previousMomentCount: 2,
       recordedDays: 3,
+      previousRecordedDays: 2,
       participatedModuleCount: 1,
       weeklyRecordCount: 4,
       monthlyJointCompletedDays: 2,
       jointCompletedDays: 2,
+      previousJointCompletedDays: 1,
+      hasPartnerModules: true,
+      longestStreakDays: 3,
+      previousLongestStreakDays: 2,
       currentStreakDays: 5,
+      currentStreakOngoing: false,
       monthlyReceivedReactionCount: 6,
       receivedReactionCount: 6,
       mostUsedEmoji: 'heart',
-      items: [{ recordId: 'new_record', stickerPath: '/new.png', displayOrder: 0 }],
+      footprint: [{ date: '2026-07-01', recordCount: 1, level: 1 }],
+      items: [{ recordId: 'new_record', moduleId: 'module_1', recordDate: '2026-07-01', stickerPath: '/new.png', displayOrder: 0 }],
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
 
     const getImageInfo = wx.getImageInfo as ReturnType<typeof vi.fn>;
     expect(getImageInfo).toHaveBeenCalledWith(expect.objectContaining({ src: '/new.png' }));
     expect(page.data.stickers[0].id).toBe('old_record');
     expect(page.data.stickerPhase).toBe('sticker-visible');
 
-    getImageInfo.mock.calls[0][0].success({});
+    const newImageCall = getImageInfo.mock.calls.find(([options]) => options.src === '/new.png');
+    expect(newImageCall).toBeDefined();
+    newImageCall?.[0].success({});
     await vi.advanceTimersByTimeAsync(0);
     expect(page.data.stickerPhase).toBe('sticker-leaving');
 

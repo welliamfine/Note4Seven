@@ -9,7 +9,7 @@
     <view wx:elif="{{view}}" class="beta-body">
       <view class="invite-card beta-glass {{view.inviteAvailable ? '' : 'invite-disabled'}}" bindtap="openInvite">
         <view><text class="invite-title">当前成员</text><text class="invite-count">{{view.members.length}}/{{view.memberLimit}}人</text><text class="invite-copy">邀请卡片有效期24小时</text></view>
-        <image class="invite-decoration" src="/assets/ui/invite-paper-bag.webp" mode="aspectFit" webp />
+        <image class="invite-decoration" src="/subpackages/assets/ui/invite-paper-bag.png" mode="aspectFit" />
       </view>
       <text class="beta-section-title">成员列表</text>
       <view class="member-list beta-glass">

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, buildMonthGrid, differenceInDays, monthLabel, shanghaiDate } from '../src/utils/date';
+import { addDays, buildMonthGrid, differenceInDays, monthLabel, shanghaiDate, shanghaiNowIso } from '../src/utils/date';
 
 describe('business date utilities', () => {
   it('uses Asia/Shanghai rather than the device day', () => {
     expect(shanghaiDate(new Date('2026-07-15T17:00:00Z'))).toBe('2026-07-16');
+    expect(shanghaiNowIso(new Date('2026-07-15T17:00:00Z'))).toBe('2026-07-16T01:00:00.000+08:00');
   });
 
   it('adds days across month boundaries', () => {

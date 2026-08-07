@@ -11,13 +11,16 @@ import type {
   MonthlyMemoryCard,
   Reaction,
   ReminderSubscription,
+  StreakRewardDraw,
+  StreakRewardEvent,
+  StreakRewardRule,
   User,
 } from '../types/domain';
 import { DEFAULT_MODULE_TEMPLATES } from '../config/module-templates';
 import { addDays, shanghaiDate, shanghaiNowIso } from '../utils/date';
 
 const DATABASE_KEY = 'notemylife.alpha.database.v1';
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 export const STICKER_PATHS = [
   '/assets/stickers/group-1.png',
@@ -257,6 +260,9 @@ function createSeedDatabase(): AppDatabase {
 
   const dailySnapshots: DailyModuleSnapshot[] = [];
   const monthlyMemoryCards: MonthlyMemoryCard[] = [];
+  const streakRewardRules: StreakRewardRule[] = [];
+  const streakRewardEvents: StreakRewardEvent[] = [];
+  const streakRewardDraws: StreakRewardDraw[] = [];
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -280,6 +286,9 @@ function createSeedDatabase(): AppDatabase {
     reminders,
     dailySnapshots,
     monthlyMemoryCards,
+    streakRewardRules,
+    streakRewardEvents,
+    streakRewardDraws,
     privacyVersion: '2026-07-21',
     idempotency: {},
   };
@@ -387,6 +396,13 @@ function migrateRecordPolicies(database: AppDatabase): void {
   database.modules.forEach((module) => {
     module.recordPolicy ??= 'strict';
   });
+  database.schemaVersion = 9;
+}
+
+function migrateStreakRewards(database: AppDatabase): void {
+  database.streakRewardRules ??= [];
+  database.streakRewardEvents ??= [];
+  database.streakRewardDraws ??= [];
   database.schemaVersion = SCHEMA_VERSION;
 }
 
@@ -421,6 +437,9 @@ export function bootstrapDatabase(): void {
   }
   if (existing?.schemaVersion === 8) {
     migrateRecordPolicies(existing);
+  }
+  if (existing?.schemaVersion === 9) {
+    migrateStreakRewards(existing);
     wx.setStorageSync(DATABASE_KEY, existing);
   } else if (existing?.schemaVersion === SCHEMA_VERSION && !existing.betaDemoSeeded) {
     seedBetaDemoState(existing);

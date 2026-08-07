@@ -46,7 +46,7 @@ function authenticate(pool: Pool, required: boolean) {
            JOIN user_account u ON u.user_id = s.user_id
           WHERE s.token_hash = ?
             AND s.revoked_at IS NULL
-            AND s.expires_at > UTC_TIMESTAMP(3)
+            AND s.expires_at > CURRENT_TIMESTAMP(3)
             AND u.status IN ('active', 'deletion_pending')
           LIMIT 1`,
         [sha256(match[1])],

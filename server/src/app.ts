@@ -19,6 +19,7 @@ import { mediaRoutes } from './routes/media';
 import { moduleRoutes } from './routes/modules';
 import { recordRoutes } from './routes/records';
 import { storageEventRoutes } from './routes/storage-events';
+import { streakRewardRoutes } from './routes/streak-rewards';
 import { viewRoutes } from './routes/views';
 import { wechatEventRoutes } from './routes/wechat-events';
 import type { StorageService } from './services/storage';
@@ -117,6 +118,7 @@ export function createApp(dependencies: ApplicationDependencies) {
   api.use(moduleRoutes(pool, wechat, storage));
   api.use(mediaRoutes(pool, storage, dependencies.onMediaQueued));
   api.use(recordRoutes(pool, storage, wechat, dependencies.onMediaQueued));
+  api.use(streakRewardRoutes(pool, storage, wechat));
   api.use(makeupRoutes(pool, wechat));
   api.use(accountRoutes(pool, config));
   api.use(analyticsRoutes(pool, config, dependencies.metrics));

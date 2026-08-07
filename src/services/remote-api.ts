@@ -28,15 +28,20 @@ import type {
   GalleryView,
   InvitePreview,
   MemberManagementView,
-  MemoryModuleOption,
+  MemoryReportMode,
   MemoryView,
   ModuleInboxView,
   NotificationView,
   PrivacyView,
   ProfileOverview,
   ReactionView,
+  PendingStreakReward,
+  RevealedStreakReward,
   RecycleModuleView,
   ReminderView,
+  SaveStreakRewardRuleInput,
+  StreakRewardPreview,
+  StreakRewardRuleView,
   SaveRecordInput,
   SubmitMakeupInput,
   UpdateCurrentUserProfileInput,
@@ -52,8 +57,6 @@ const makeupCache = new Map<string, MakeupApproval>();
 const inboxCountCache = new Map<string, number>();
 const monthSummaryCache = new Map<string, { currentUserRecordedDays: number; jointCompletedDays: number; receivedReactionCount: number }>();
 const preparedMediaCache = new Map<string, PreparedMediaFile>();
-let memoryModuleOptionsCache: MemoryModuleOption[] = [];
-let weeklyMemoryOverviewCache: { week: string; view: Json } | null = null;
 interface MediaReservation {
   mediaId: string;
   upload: { cloudPath: string };
@@ -93,6 +96,8 @@ function belongsToActiveMember(memberInstanceId: unknown, activeMemberIds: Set<s
 }
 
 function mapRecord(raw: Json): LifeRecord {
+  const generatedStickerPath = String(raw.stickerThumbnailUrl ?? raw.stickerUrl ?? '');
+  const displayPath = String(raw.displayThumbnailUrl ?? raw.displayUrl ?? generatedStickerPath);
   const result: LifeRecord = {
     recordId: String(raw.recordId),
     mediaId: raw.mediaId ? String(raw.mediaId) : undefined,
@@ -100,8 +105,10 @@ function mapRecord(raw: Json): LifeRecord {
     memberInstanceId: String(raw.memberInstanceId),
     userId: String(raw.userId ?? ''),
     recordDate: String(raw.recordDate),
-    originalPath: String(raw.originalUrl ?? raw.originalThumbnailUrl ?? ''),
-    stickerPath: String(raw.stickerThumbnailUrl ?? raw.stickerUrl ?? ''),
+    originalPath: String(raw.originalThumbnailUrl ?? raw.originalUrl ?? ''),
+    stickerPath: displayPath,
+    generatedStickerPath,
+    mediaVariant: raw.mediaVariant === 'original' ? 'original' : 'sticker',
     remark: String(raw.remark ?? ''),
     source: raw.source === 'makeup' ? 'makeup' : 'normal',
     status: raw.status,
@@ -245,7 +252,6 @@ export async function getHomeModules(
     normal: (groups.find((item) => item.groupType === 'normal')?.items ?? []).map(map),
   };
   const modules = [...view.pinned, ...view.normal];
-  memoryModuleOptionsCache = modules.map((module) => ({ moduleId: module.moduleId, name: module.name }));
   if (options.reconcileNotifications === false) {
     return view;
   }
@@ -379,6 +385,13 @@ export function discardPrewarmedMediaUpload(moduleId: string): void {
   });
 }
 
+export async function discardMedia(mediaId: string): Promise<void> {
+  await remoteRequest(`/media/${mediaId}/abandon`, {
+    method: 'POST',
+    data: { clientRequestId: createId('media_abandon') },
+  });
+}
+
 export async function initializeAndUploadCheckin(
   input: CheckinUploadInput,
   onProgress?: (progress: number) => void,
@@ -429,6 +442,7 @@ export async function getCheckinProcessingStatus(checkinId: string): Promise<Che
     canLeave: Boolean(result.canLeave),
     elapsedMs: Number(result.elapsedMs ?? 0),
     stickerUrl: result.stickerUrl ? String(result.stickerUrl) : undefined,
+    originalUrl: result.originalUrl ? String(result.originalUrl) : undefined,
     retryable: Boolean(result.retryable),
     message: result.message ? String(result.message) : undefined,
   };
@@ -451,12 +465,12 @@ export async function saveRecord(input: SaveRecordInput): Promise<LifeRecord> {
     const previous = recordCache.get(input.recordId) ?? mapRecord(await remoteRequest<Json>(`/records/${input.recordId}`));
     const mediaId = input.mediaId ?? previous.mediaId;
     if (!mediaId) throw new Error('MEDIA_NOT_READY');
-    await remoteRequest(`/records/${input.recordId}`, { method: 'PATCH', data: { mediaId, remark: input.remark, version: previous.version ?? 0, clientRequestId: input.clientRequestId } });
+    await remoteRequest(`/records/${input.recordId}`, { method: 'PATCH', data: { mediaId, mediaVariant: input.mediaVariant ?? 'sticker', remark: input.remark, version: previous.version ?? 0, clientRequestId: input.clientRequestId } });
     return mapRecord(await remoteRequest<Json>(`/records/${input.recordId}`));
   }
   if (!input.mediaId) throw new Error('MEDIA_NOT_READY');
   const created = await remoteRequest<Json>(`/modules/${input.moduleId}/records`, {
-    method: 'POST', data: { recordDate: input.recordDate, mediaId: input.mediaId, remark: input.remark, clientRequestId: input.clientRequestId },
+    method: 'POST', data: { recordDate: input.recordDate, mediaId: input.mediaId, mediaVariant: input.mediaVariant ?? 'sticker', remark: input.remark, clientRequestId: input.clientRequestId },
   });
   return mapRecord(await remoteRequest<Json>(`/records/${created.recordId}`));
 }
@@ -610,9 +624,9 @@ export async function setRecordReaction(recordId: string, emojiCode: ReactionEmo
 export async function submitMakeupRecord(input: SubmitMakeupInput): Promise<{ record: LifeRecord; approval?: MakeupApproval }> {
   if (!input.mediaId) throw new Error('MEDIA_NOT_READY');
   const result = await remoteRequest<Json>(`/modules/${input.moduleId}/makeup-applications`, {
-    method: 'POST', data: { recordDate: input.recordDate, mediaId: input.mediaId, remark: input.remark, clientRequestId: input.clientRequestId },
+    method: 'POST', data: { recordDate: input.recordDate, mediaId: input.mediaId, mediaVariant: input.mediaVariant ?? 'sticker', remark: input.remark, clientRequestId: input.clientRequestId },
   });
-  const record = mapRecord({ ...result.record, moduleId: input.moduleId, mediaId: input.mediaId, memberInstanceId: '', userId: currentUserCache?.userId, originalUrl: input.originalPath, stickerUrl: input.stickerPath, remark: input.remark, source: 'makeup' });
+  const record = mapRecord({ ...result.record, moduleId: input.moduleId, mediaId: input.mediaId, memberInstanceId: '', userId: currentUserCache?.userId, originalThumbnailUrl: input.originalPath, stickerUrl: input.stickerPath, displayUrl: input.mediaVariant === 'original' ? input.originalPath : input.stickerPath, mediaVariant: input.mediaVariant, remark: input.remark, source: 'makeup' });
   if (!result.approval) return { record };
   const approval = await getApproval(String(result.approval.approvalId));
   makeupCache.set(approval.approvalId, approval);
@@ -728,6 +742,11 @@ export async function getModuleReminder(moduleId: string): Promise<ReminderView>
   return {
     reminderId: String(raw.reminderId ?? ''), moduleId, userId: currentUserCache?.userId ?? '', enabled: Boolean(raw.enabled), reminderTime: String(raw.reminderTime).slice(0, 5),
     inAppEnabled: true, subscriptionStatus: raw.subscriptionStatus, paused: false, lastSentDate: raw.lastSentDate ?? undefined,
+    checkinNotificationsEnabled: Boolean(raw.checkinNotificationsEnabled),
+    checkinNotificationStatus: raw.checkinNotificationStatus ?? 'not_requested',
+    checkinNotificationCredits: Number(raw.checkinNotificationCredits ?? 0),
+    checkinNotificationLastSentAt: raw.checkinNotificationLastSentAt ?? undefined,
+    checkinNotificationLastSendStatus: raw.checkinNotificationLastSendStatus ?? undefined,
     createdAt: String(raw.createdAt ?? shanghaiNowIso()), updatedAt: String(raw.updatedAt ?? shanghaiNowIso()), moduleName: module.name,
   };
 }
@@ -742,6 +761,168 @@ export async function updateModuleReminder(moduleId: string, input: UpdateRemind
     method: 'PUT', data: { enabled: input.enabled && subscriptionStatus === 'authorized', reminderTime: `${input.reminderTime}:00`, subscriptionStatus, clientRequestId: createId('reminder') },
   });
   return getModuleReminder(moduleId);
+}
+
+export async function updateCheckinNotificationSubscription(
+  moduleId: string,
+  enabled: boolean,
+): Promise<ReminderView> {
+  let authorizationGranted = false;
+  if (enabled) {
+    if (!SUBSCRIBE_TEMPLATE_ID) throw new Error('SUBSCRIBE_TEMPLATE_NOT_CONFIGURED');
+    const permission = await wx.requestSubscribeMessage({ tmplIds: [SUBSCRIBE_TEMPLATE_ID] });
+    authorizationGranted = permission[SUBSCRIBE_TEMPLATE_ID] === 'accept';
+  }
+  await remoteRequest(`/modules/${moduleId}/checkin-notification-subscription`, {
+    method: 'PUT',
+    data: {
+      enabled,
+      authorizationGranted,
+      clientRequestId: createId('checkin_subscription'),
+    },
+  });
+  if (enabled && !authorizationGranted) throw new Error('SUBSCRIPTION_NOT_AUTHORIZED');
+  return getModuleReminder(moduleId);
+}
+
+export async function getMyStreakRewardRule(moduleId: string): Promise<StreakRewardRuleView> {
+  const raw = await remoteRequest<Json>(`/modules/${moduleId}/streak-rewards`);
+  return { rules: (Array.isArray(raw.rules) ? raw.rules : []).map((entry: Json) => ({
+    rule: {
+      rewardRuleId: String(entry.rule.rewardRuleId),
+      moduleId,
+      sponsorUserId: String(entry.rule.sponsorUserId ?? ''),
+      sponsorMemberInstanceId: String(entry.rule.sponsorMemberInstanceId),
+      targetType: entry.rule.targetType === 'member' ? 'member' : 'all',
+      targetMemberInstanceId: entry.rule.targetMemberInstanceId ? String(entry.rule.targetMemberInstanceId) : undefined,
+      coverMediaId: entry.rule.coverMediaId ? String(entry.rule.coverMediaId) : undefined,
+      prizeTitle: String(entry.rule.prizeTitle),
+      prizeDescription: String(entry.rule.prizeDescription ?? ''),
+      winProbability: Number(entry.rule.winProbability) as 20 | 50 | 80 | 100,
+      streakDays: Number(entry.rule.streakDays),
+      status: entry.rule.status,
+      expiresAt: String(entry.rule.expiresAt),
+      triggeredAt: entry.rule.triggeredAt ? String(entry.rule.triggeredAt) : undefined,
+      cancelledAt: entry.rule.cancelledAt ? String(entry.rule.cancelledAt) : undefined,
+      createdAt: String(entry.rule.createdAt),
+      updatedAt: String(entry.rule.updatedAt),
+    },
+    progressDays: Number(entry.progressDays ?? 0),
+    targetMemberName: entry.targetMemberName ? String(entry.targetMemberName) : undefined,
+  })) };
+}
+
+export async function saveStreakRewardRule(moduleId: string, input: SaveStreakRewardRuleInput): Promise<StreakRewardRuleView> {
+  await remoteRequest(`/modules/${moduleId}/streak-rewards`, {
+    method: 'POST',
+    data: { ...input, clientRequestId: createId('reward_rule') },
+  });
+  return getMyStreakRewardRule(moduleId);
+}
+
+export async function cancelStreakRewardRule(moduleId: string, rewardRuleId: string): Promise<void> {
+  await remoteRequest(`/modules/${moduleId}/streak-rewards/${rewardRuleId}`, {
+    method: 'DELETE',
+    data: { clientRequestId: createId('reward_cancel') },
+  });
+}
+
+export async function previewStreakReward(moduleId: string, rewardRuleId: string): Promise<StreakRewardPreview> {
+  const raw = await remoteRequest<Json>(`/modules/${moduleId}/streak-rewards/${rewardRuleId}/preview`, {
+    method: 'POST',
+    data: { clientRequestId: createId('reward_preview') },
+  });
+  const pending: PendingStreakReward = {
+    rewardDrawId: String(raw.pending.rewardDrawId),
+    moduleId,
+    sponsorName: String(raw.pending.sponsorName),
+    targetType: raw.pending.targetType === 'member' ? 'member' : 'all',
+    streakDays: Number(raw.pending.streakDays),
+    windowStart: String(raw.pending.windowStart),
+    windowEnd: String(raw.pending.windowEnd),
+  };
+  return {
+    pending,
+    revealed: {
+      ...pending,
+      resultType: raw.revealed.resultType === 'gift' ? 'gift' : 'sticker',
+      prizeTitle: String(raw.revealed.prizeTitle),
+      prizeDescription: String(raw.revealed.prizeDescription ?? ''),
+      stickerPath: raw.revealed.stickerUrl ? String(raw.revealed.stickerUrl) : undefined,
+      coverPath: raw.revealed.coverUrl ? String(raw.revealed.coverUrl) : undefined,
+      stickerRecordDate: raw.revealed.stickerRecordDate ? String(raw.revealed.stickerRecordDate) : undefined,
+      stickerRemark: raw.revealed.stickerRemark ? String(raw.revealed.stickerRemark) : undefined,
+      stickerMemberName: raw.revealed.stickerMemberName ? String(raw.revealed.stickerMemberName) : undefined,
+    },
+  };
+}
+
+export async function getPendingStreakReward(moduleId: string): Promise<PendingStreakReward | undefined> {
+  return (await getPendingStreakRewards(moduleId))[0];
+}
+
+export async function getPendingStreakRewards(moduleId: string): Promise<PendingStreakReward[]> {
+  const raw = await remoteRequest<Json>(`/modules/${moduleId}/streak-rewards/pending`);
+  const draws = Array.isArray(raw.draws) ? raw.draws : (raw.draw ? [raw.draw] : []);
+  return draws.map((draw: Json) => ({
+    rewardDrawId: String(draw.rewardDrawId),
+    moduleId,
+    sponsorName: String(draw.sponsorName),
+    targetType: draw.targetType === 'member' ? 'member' : 'all',
+    streakDays: Number(draw.streakDays),
+    windowStart: String(draw.windowStart),
+    windowEnd: String(draw.windowEnd),
+  }));
+}
+
+export async function revealStreakReward(rewardDrawId: string): Promise<RevealedStreakReward> {
+  const raw = await remoteRequest<Json>(`/streak-reward-draws/${rewardDrawId}/reveal`, {
+    method: 'POST',
+    data: { clientRequestId: createId('reward_reveal') },
+  });
+  return {
+    rewardDrawId,
+    moduleId: String(raw.moduleId),
+    sponsorName: String(raw.sponsorName),
+    targetType: raw.targetType === 'member' ? 'member' : 'all',
+    streakDays: Number(raw.streakDays),
+    windowStart: String(raw.windowStart),
+    windowEnd: String(raw.windowEnd),
+    resultType: raw.resultType === 'gift' ? 'gift' : 'sticker',
+    prizeTitle: String(raw.prizeTitle),
+    prizeDescription: String(raw.prizeDescription ?? ''),
+    stickerPath: raw.stickerUrl ? String(raw.stickerUrl) : undefined,
+    coverPath: raw.coverUrl ? String(raw.coverUrl) : undefined,
+    stickerRecordDate: raw.stickerRecordDate ? String(raw.stickerRecordDate) : undefined,
+    stickerRemark: raw.stickerRemark ? String(raw.stickerRemark) : undefined,
+    stickerMemberName: raw.stickerMemberName ? String(raw.stickerMemberName) : undefined,
+    revealedAt: raw.revealedAt ? String(raw.revealedAt) : undefined,
+  };
+}
+
+export async function getReceivedStreakRewards(moduleId: string): Promise<import('./local-api').ReceivedStreakRewards> {
+  const raw = await remoteRequest<Json>(`/modules/${moduleId}/streak-rewards/received`);
+  const items = (Array.isArray(raw.items) ? raw.items : []).map((item: Json): RevealedStreakReward => ({
+    rewardDrawId: String(item.rewardDrawId), moduleId,
+    sponsorName: String(item.sponsorName), targetType: item.targetType === 'member' ? 'member' : 'all',
+    streakDays: Number(item.streakDays), windowStart: String(item.windowStart), windowEnd: String(item.windowEnd),
+    resultType: item.resultType === 'gift' ? 'gift' : 'sticker', prizeTitle: String(item.prizeTitle),
+    prizeDescription: String(item.prizeDescription ?? ''),
+    stickerPath: item.stickerUrl ? String(item.stickerUrl) : undefined,
+    coverPath: item.coverUrl ? String(item.coverUrl) : undefined,
+    stickerRecordDate: item.stickerRecordDate ? String(item.stickerRecordDate) : undefined,
+    stickerRemark: item.stickerRemark ? String(item.stickerRemark) : undefined,
+    stickerMemberName: item.stickerMemberName ? String(item.stickerMemberName) : undefined,
+    revealedAt: item.revealedAt ? String(item.revealedAt) : undefined,
+  }));
+  return {
+    items,
+    counts: {
+      all: Number(raw.counts?.all ?? items.length),
+      gift: Number(raw.counts?.gift ?? items.filter((item) => item.resultType === 'gift').length),
+      sticker: Number(raw.counts?.sticker ?? items.filter((item) => item.resultType === 'sticker').length),
+    },
+  };
 }
 
 export function runInAppReminderScan(): number { return 0; }
@@ -770,51 +951,186 @@ export async function restoreRecycledModule(moduleId: string): Promise<LifeModul
   return moduleFromDetail(moduleId);
 }
 
-function isoWeek(date = new Date()): string {
-  const shifted = new Date(date.getTime() + 8 * 60 * 60 * 1000);
-  const target = new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()));
-  const day = target.getUTCDay() || 7;
-  target.setUTCDate(target.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
-  return `${target.getUTCFullYear()}-W${String(Math.ceil((((target.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7)).padStart(2, '0')}`;
-}
-
-export async function getMemoryView(moduleId?: string, month = shanghaiDate().slice(0, 7), forceChange = false): Promise<MemoryView> {
-  const week = isoWeek();
-  const cachedSelected = moduleId ? moduleCache.get(moduleId) : undefined;
-  const canReuseModuleContext = forceChange
-    && cachedSelected
-    && memoryModuleOptionsCache.some((item) => item.moduleId === moduleId);
-  let moduleOptions = memoryModuleOptionsCache;
-  let selected = cachedSelected;
-  if (!canReuseModuleContext) {
+export async function getMemoryView(
+  moduleId?: string,
+  period = shanghaiDate().slice(0, 7),
+  forceChange = false,
+  reportMode: MemoryReportMode = 'month',
+  allModules = false,
+): Promise<MemoryView> {
+  let resolvedModuleId = moduleId;
+  if (!resolvedModuleId && !allModules) {
     const home = await getHomeModules();
-    const modules = [...home.pinned, ...home.normal];
-    selected = modules.find((item) => item.moduleId === moduleId) ?? modules[0];
-    moduleOptions = modules.map((item) => ({ moduleId: item.moduleId, name: item.name }));
+    resolvedModuleId = [...home.pinned, ...home.normal][0]?.moduleId;
   }
-  if (!selected) throw new Error('NO_ACTIVE_MODULE');
-  const weeklyPromise = forceChange && weeklyMemoryOverviewCache?.week === week
-    ? Promise.resolve(weeklyMemoryOverviewCache.view)
-    : remoteRequest<Json>(`/memories/weekly-overview?week=${week}`);
-  const [weekly, card] = await Promise.all([
-    weeklyPromise,
-    forceChange
-      ? remoteRequest<Json>('/memories/monthly-card/change-group', { method: 'POST', data: { moduleId: selected.moduleId, month, clientRequestId: createId('memory_group') } })
-      : remoteRequest<Json>(`/memories/monthly-card?moduleId=${selected.moduleId}&month=${month}`),
-  ]);
-  weeklyMemoryOverviewCache = { week, view: weekly };
-  const summary = {
-    currentUserRecordedDays: Number(card.currentUserRecordedDays ?? 0), jointCompletedDays: Number(card.jointCompletedDays ?? 0), receivedReactionCount: Number(card.receivedReactionCount ?? 0),
-  };
-  monthSummaryCache.set(`${selected.moduleId}:${month}`, summary);
+  const query = [
+    `mode=${reportMode}`,
+    `period=${encodeURIComponent(period)}`,
+    ...(resolvedModuleId ? [`moduleId=${encodeURIComponent(resolvedModuleId)}`] : []),
+    ...(forceChange ? [`group=${encodeURIComponent(createId('memory_group'))}`] : []),
+  ].join('&');
+  const result = await remoteRequest<Json>(`/memories/overview?${query}`);
+  if (resolvedModuleId && reportMode === 'month') {
+    monthSummaryCache.set(`${resolvedModuleId}:${period}`, {
+      currentUserRecordedDays: Number(result.recordedDays ?? 0),
+      jointCompletedDays: Number(result.jointCompletedDays ?? 0),
+      receivedReactionCount: Number(result.receivedReactionCount ?? 0),
+    });
+  }
   const emojiMap: Record<string, string> = { heart: '❤️', like: '👍', laugh: '😂', yummy: '😋', hug: '🫂', cheer: '💪' };
   return {
-    recordedDays: Number(weekly.recordedDays), participatedModuleCount: Number(weekly.participatedModuleCount), jointCompletedDays: Number(weekly.jointCompletedDays),
-    currentStreakDays: Number(weekly.currentStreakDays), receivedReactionCount: Number(weekly.receivedReactionCount), weeklyRecordCount: Number(weekly.weeklyRecordCount),
-    moduleId: selected.moduleId, moduleName: selected.name, month, modules: moduleOptions,
-    items: (card.items as Json[]).map((item) => ({ recordId: String(item.recordId), stickerPath: String(item.stickerThumbnailUrl), displayOrder: Number(item.displayOrder) })),
-    monthlyJointCompletedDays: Number(card.jointCompletedDays), monthlyReceivedReactionCount: Number(card.receivedReactionCount), mostUsedEmoji: emojiMap[String(card.mostUsedEmojiCode)] ?? '—',
+    reportMode,
+    periodKey: String(result.periodKey),
+    periodStart: String(result.periodStart),
+    periodEnd: String(result.periodEnd),
+    isCurrentPeriod: Boolean(result.isCurrentPeriod),
+    momentCount: Number(result.momentCount ?? 0),
+    previousMomentCount: Number(result.previousMomentCount ?? 0),
+    recordedDays: Number(result.recordedDays ?? 0),
+    previousRecordedDays: Number(result.previousRecordedDays ?? 0),
+    participatedModuleCount: Number(result.participatedModuleCount ?? 0),
+    jointCompletedDays: Number(result.jointCompletedDays ?? 0),
+    previousJointCompletedDays: Number(result.previousJointCompletedDays ?? 0),
+    hasPartnerModules: Boolean(result.hasPartnerModules),
+    longestStreakDays: Number(result.longestStreakDays ?? 0),
+    previousLongestStreakDays: Number(result.previousLongestStreakDays ?? 0),
+    currentStreakDays: Number(result.currentStreakDays ?? 0),
+    currentStreakOngoing: Boolean(result.currentStreakOngoing),
+    earliestTime: result.earliestTime ? String(result.earliestTime) : undefined,
+    latestTime: result.latestTime ? String(result.latestTime) : undefined,
+    receivedReactionCount: Number(result.receivedReactionCount ?? 0),
+    weeklyRecordCount: Number(result.momentCount ?? 0),
+    moduleId: String(result.moduleId ?? ''),
+    moduleName: String(result.moduleName ?? ''),
+    month: reportMode === 'month' ? String(result.periodKey) : String(result.periodStart).slice(0, 7),
+    modules: (result.modules as Json[]).map((item) => ({ moduleId: String(item.moduleId), name: String(item.name) })),
+    items: (result.items as Json[]).map((item) => ({
+      recordId: String(item.recordId),
+      moduleId: String(item.moduleId),
+      recordDate: String(item.recordDate),
+      stickerPath: String(item.stickerPath),
+      displayOrder: Number(item.displayOrder),
+    })),
+    footprint: (result.footprint as Json[]).map((item) => ({
+      date: String(item.date),
+      recordCount: Number(item.recordCount ?? 0),
+      level: Number(item.level ?? 0),
+      ...(item.stickerPath ? { stickerPath: String(item.stickerPath) } : {}),
+    })),
+    monthlyJointCompletedDays: reportMode === 'month' ? Number(result.jointCompletedDays ?? 0) : 0,
+    monthlyReceivedReactionCount: reportMode === 'month' ? Number(result.receivedReactionCount ?? 0) : 0,
+    mostUsedEmoji: emojiMap[String(result.mostUsedEmojiCode)] ?? '—',
+    ...(result.latestStickerPath ? { latestStickerPath: String(result.latestStickerPath) } : {}),
+    ...(result.collage ? { collage: mapSavedMemoryCollage(result.collage as Json) } : {}),
+  };
+}
+
+function mapSavedMemoryCollage(raw: Json): import('./local-api').SavedMemoryCollage {
+  const board = raw.board as Json | null | undefined;
+  return {
+    collageId: String(raw.collageId),
+    version: Number(raw.version ?? 0),
+    savedAt: String(raw.savedAt ?? ''),
+    board: board ? {
+      boardAssetId: String(board.boardAssetId),
+      name: String(board.name ?? ''),
+      thumbnailPath: String(board.thumbnailUrl ?? ''),
+      imagePath: String(board.imageUrl ?? ''),
+      editableBounds: {
+        left: Number((board.editableBounds as Json | undefined)?.left ?? 0.04),
+        top: Number((board.editableBounds as Json | undefined)?.top ?? 0.04),
+        right: Number((board.editableBounds as Json | undefined)?.right ?? 0.96),
+        bottom: Number((board.editableBounds as Json | undefined)?.bottom ?? 0.96),
+      },
+    } : null,
+    items: (Array.isArray(raw.items) ? raw.items : []).map((item: Json) => ({
+      itemId: String(item.itemId),
+      assetType: item.assetType === 'decorative_sticker' ? 'decorative_sticker' : 'record_sticker',
+      ...(item.recordId ? { recordId: String(item.recordId) } : {}),
+      ...(item.moduleId ? { moduleId: String(item.moduleId) } : {}),
+      ...(item.recordDate ? { recordDate: String(item.recordDate) } : {}),
+      ...(item.stickerAssetId ? { stickerAssetId: String(item.stickerAssetId) } : {}),
+      ...(item.name ? { name: String(item.name) } : {}),
+      imagePath: String(item.imageUrl),
+      x: Number(item.x),
+      y: Number(item.y),
+      width: Number(item.width),
+      height: Number(item.height),
+      rotation: Number(item.rotation),
+      zIndex: Number(item.zIndex),
+    })),
+  };
+}
+
+export async function getMemoryCollage(
+  moduleId: string | undefined,
+  periodKey: string,
+  reportMode: MemoryReportMode,
+): Promise<import('./local-api').MemoryCollageView> {
+  const query = [
+    `mode=${reportMode}`,
+    `period=${encodeURIComponent(periodKey)}`,
+    ...(moduleId ? [`moduleId=${encodeURIComponent(moduleId)}`] : []),
+  ].join('&');
+  return mapMemoryCollageView(await remoteRequest<Json>(`/memories/collage?${query}`));
+}
+
+export async function saveMemoryCollage(
+  input: import('./local-api').SaveMemoryCollageInput,
+): Promise<import('./local-api').MemoryCollageView> {
+  return mapMemoryCollageView(await remoteRequest<Json>('/memories/collage', {
+    method: 'PUT',
+    data: {
+      ...input,
+      moduleId: input.moduleId ?? null,
+      boardAssetId: input.boardAssetId ?? null,
+      force: input.force ?? false,
+      clientRequestId: createId('collage_save'),
+    },
+  }));
+}
+
+function mapMemoryCollageView(raw: Json): import('./local-api').MemoryCollageView {
+  return {
+    reportMode: raw.reportMode === 'week' ? 'week' : 'month',
+    periodKey: String(raw.periodKey),
+    scopeKey: String(raw.scopeKey),
+    moduleId: String(raw.moduleId ?? ''),
+    moduleName: String(raw.moduleName ?? ''),
+    collage: raw.collage ? mapSavedMemoryCollage(raw.collage as Json) : null,
+    availableRecordStickers: (Array.isArray(raw.availableRecordStickers) ? raw.availableRecordStickers : [])
+      .map((item: Json) => ({
+        recordId: String(item.recordId),
+        moduleId: String(item.moduleId),
+        recordDate: String(item.recordDate),
+        stickerPath: String(item.stickerPath),
+        displayOrder: Number(item.displayOrder),
+      })),
+    boards: (Array.isArray(raw.boards) ? raw.boards : []).map((board: Json) => ({
+      boardAssetId: String(board.boardAssetId),
+      name: String(board.name),
+      category: String(board.category ?? ''),
+      thumbnailPath: String(board.thumbnailUrl),
+      imagePath: String(board.imageUrl),
+      editableBounds: {
+        left: Number((board.editableBounds as Json | undefined)?.left ?? 0.04),
+        top: Number((board.editableBounds as Json | undefined)?.top ?? 0.04),
+        right: Number((board.editableBounds as Json | undefined)?.right ?? 0.96),
+        bottom: Number((board.editableBounds as Json | undefined)?.bottom ?? 0.96),
+      },
+    })),
+    decorativeStickers: (Array.isArray(raw.decorativeStickers) ? raw.decorativeStickers : [])
+      .map((sticker: Json) => ({
+        stickerAssetId: String(sticker.stickerAssetId),
+        name: String(sticker.name),
+        category: String(sticker.category),
+        thumbnailPath: String(sticker.thumbnailUrl),
+        imagePath: String(sticker.imageUrl),
+        defaultWidth: Number(sticker.defaultWidth),
+        defaultHeight: Number(sticker.defaultHeight),
+      })),
+    decorativeStickerCategories: (Array.isArray(raw.decorativeStickerCategories)
+      ? raw.decorativeStickerCategories : []).map(String),
   };
 }
 

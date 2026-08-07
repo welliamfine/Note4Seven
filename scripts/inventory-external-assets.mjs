@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { beijingIso } from './lib/time.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const output = join(root, 'docs', 'governance', 'external-assets.json');
@@ -34,7 +35,7 @@ await mkdir(join(output, '..'), { recursive: true });
 await writeFile(output, `${JSON.stringify({
   schemaVersion: 1,
   policy: 'external-controlled-archive',
-  generatedAt: new Date().toISOString(),
+  generatedAt: beijingIso(),
   storageLocation: 'TO_BE_CONFIGURED_BY_REPOSITORY_ADMIN',
   assets,
 }, null, 2)}\n`);

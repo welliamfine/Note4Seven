@@ -4,6 +4,7 @@ import {
   getModuleReminder,
   MODULE_DESCRIPTION_MAX_LENGTH,
   MODULE_NAME_MAX_LENGTH,
+  updateCheckinNotificationSubscription,
   updateModuleInfo,
   updateModuleReminder,
   type ReminderView,
@@ -28,13 +29,19 @@ Page({
     inAppEnabled: true,
     reminderTime: '21:00',
     reminderSaving: false,
+    checkinNotificationsEnabled: false,
+    checkinNotificationCredits: 0,
+    checkinNotificationSaving: false,
     removing: false,
   },
   onLoad(query: Record<string, string | undefined>) { this.setData({ moduleId: query.moduleId ?? '', statusBarHeight: wx.getWindowInfo?.().statusBarHeight ?? 24 }); },
   onShow() { void this.load(); },
   async load() {
     try {
-      const [view, reminder] = await Promise.all([getMemberManagement(this.data.moduleId), getModuleReminder(this.data.moduleId)]);
+      const [view, reminder] = await Promise.all([
+        getMemberManagement(this.data.moduleId),
+        getModuleReminder(this.data.moduleId),
+      ]);
       this.setData({
         view,
         reminder,
@@ -43,6 +50,8 @@ Page({
         reminderEnabled: reminder.enabled,
         inAppEnabled: reminder.inAppEnabled,
         reminderTime: reminder.reminderTime,
+        checkinNotificationsEnabled: reminder.checkinNotificationsEnabled,
+        checkinNotificationCredits: reminder.checkinNotificationCredits,
         loading: false,
       });
       track('module_settings_view', { moduleId: this.data.moduleId, role: view.currentRole });
@@ -54,6 +63,30 @@ Page({
   onReminderEnabled(event: SwitchEvent) { this.setData({ reminderEnabled: event.detail.value }); },
   onInAppEnabled(event: SwitchEvent) { this.setData({ inAppEnabled: event.detail.value }); },
   onReminderTime(event: WechatMiniprogram.CustomEvent<{ value: string }>) { this.setData({ reminderTime: event.detail.value }); },
+  async onCheckinNotificationsEnabled(event: SwitchEvent) {
+    await this.updateCheckinNotifications(event.detail.value);
+  },
+  async renewCheckinNotifications() {
+    await this.updateCheckinNotifications(true);
+  },
+  async updateCheckinNotifications(enabled: boolean) {
+    if (this.data.checkinNotificationSaving) return;
+    const previousEnabled = this.data.checkinNotificationsEnabled;
+    this.setData({ checkinNotificationSaving: true });
+    try {
+      const reminder = await updateCheckinNotificationSubscription(this.data.moduleId, enabled);
+      this.setData({
+        reminder,
+        checkinNotificationsEnabled: reminder.checkinNotificationsEnabled,
+        checkinNotificationCredits: reminder.checkinNotificationCredits,
+        checkinNotificationSaving: false,
+      });
+      wx.showToast({ title: enabled ? '已订阅下一条动态' : '已关闭动态通知' });
+    } catch {
+      this.setData({ checkinNotificationsEnabled: previousEnabled, checkinNotificationSaving: false });
+      wx.showToast({ title: enabled ? '未获得微信订阅授权' : '设置保存失败', icon: 'none' });
+    }
+  },
   async save() {
     if (this.data.saving) return;
     const name = this.data.name.trim();

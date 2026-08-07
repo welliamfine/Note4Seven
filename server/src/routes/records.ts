@@ -10,12 +10,15 @@ import { requireMember } from '../services/access';
 import { idempotent, isDuplicateKey } from '../services/idempotency';
 import { canMutateRecord, assertNormalRecordDate } from '../services/record-policy';
 import { invalidateMonthlyMemoryCards, refreshRecordProjections } from '../services/record-projections';
+import { evaluateStreakRewardsSafely } from '../services/streak-rewards';
+import { queueCheckinNotifications } from '../services/checkin-notifications';
 import type { StorageService } from '../services/storage';
 import type { WechatService } from '../services/wechat';
 
 const createBody = z.object({
   recordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   mediaId: z.string(),
+  mediaVariant: z.enum(['sticker', 'original']).default('sticker'),
   remark: z.string().trim().max(500).default(''),
   clientRequestId: z.string().min(8).max(64),
 });
@@ -34,6 +37,7 @@ const initializeCheckinBody = z.object({
 
 const updateBody = z.object({
   mediaId: z.string(),
+  mediaVariant: z.enum(['sticker', 'original']).default('sticker'),
   remark: z.string().trim().max(500).default(''),
   version: z.number().int().nonnegative(),
   clientRequestId: z.string().min(8).max(64),
@@ -53,6 +57,7 @@ const simpleWriteBody = z.object({ clientRequestId: z.string().min(8).max(64) })
 
 interface MediaRow extends RowDataPacket {
   media_id: string;
+  media_variant: 'sticker' | 'original';
   owner_user_id: string;
   module_id: string;
   member_instance_id: string;
@@ -114,6 +119,8 @@ interface ProcessingRecordRow extends RowDataPacket {
   media_status: string;
   cutout_status: string;
   content_check_status: string;
+  original_file_key: string;
+  thumbnail_file_key: string | null;
   sticker_file_key: string | null;
   sticker_thumbnail_file_key: string | null;
   processing_attempts: number;
@@ -156,9 +163,9 @@ export function recordRoutes(
 
         const [recordInsert] = await connection.execute<ResultSetHeader>(
           `INSERT INTO life_record
-             (module_id, member_instance_id, user_id, record_date, source, status, media_id, remark,
+             (module_id, member_instance_id, user_id, record_date, source, status, media_id, media_variant, remark,
               display_name_snapshot, avatar_file_key_snapshot, join_sequence_snapshot, client_request_id)
-           VALUES (?, ?, ?, ?, 'normal', 'pending', ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, 'normal', 'pending', ?, 'sticker', ?, ?, ?, ?, ?)`,
           [moduleId, access.member_instance_id, user.userId, body.recordDate, mediaId, body.remark || null,
             user.nickname, user.avatarFileKey, access.join_sequence, body.clientRequestId],
         );
@@ -212,6 +219,7 @@ export function recordRoutes(
       elapsedMs: Math.max(0, Date.now() - new Date(record.created_at).getTime()),
       stickerUrl: ready && (record.sticker_thumbnail_file_key || record.sticker_file_key)
         ? await storage.signedUrl(record.sticker_thumbnail_file_key || record.sticker_file_key!) : null,
+      originalUrl: ready ? await storage.signedUrl(originalDisplayKey(record)) : null,
       retryable: failed && record.processing_attempts < 3,
       message: rejected
         ? '图片未通过审核，请更换图片'
@@ -268,7 +276,7 @@ export function recordRoutes(
       if (record.record_status !== 'pending') throw new AppError('RECORD_LOCKED', '该记录已经不能取消', 409);
       await connection.execute("UPDATE life_record SET status = 'cancelled', version = version + 1 WHERE record_id = ?", [recordId]);
       await connection.execute(
-        `UPDATE media_asset SET status = 'abandoned', abandoned_at = UTC_TIMESTAMP(3), version = version + 1
+        `UPDATE media_asset SET status = 'abandoned', abandoned_at = CURRENT_TIMESTAMP(3), version = version + 1
           WHERE media_id = ? AND status NOT IN ('ready', 'abandoned')`,
         [record.media_id],
       );
@@ -293,25 +301,26 @@ export function recordRoutes(
         const now = new Date();
         const [insert] = await connection.execute<ResultSetHeader>(
           `INSERT INTO life_record
-             (module_id, member_instance_id, user_id, record_date, source, status, media_id, remark,
+             (module_id, member_instance_id, user_id, record_date, source, status, media_id, media_variant, remark,
               display_name_snapshot, avatar_file_key_snapshot, join_sequence_snapshot, client_request_id,
               first_effective_at)
-           VALUES (?, ?, ?, ?, 'normal', 'active', ?, ?, ?, ?, ?, ?, ?)`,
-          [moduleId, access.member_instance_id, user.userId, body.recordDate, mediaId, body.remark || null,
+           VALUES (?, ?, ?, ?, 'normal', 'active', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [moduleId, access.member_instance_id, user.userId, body.recordDate, mediaId, body.mediaVariant, body.remark || null,
             user.nickname, user.avatarFileKey, access.join_sequence, body.clientRequestId, now],
         );
         const recordId = String(insert.insertId);
         await connection.execute(
           `INSERT INTO record_revision
-             (record_id, revision_no, media_id, remark, changed_by_user_id, change_type)
-           VALUES (?, 1, ?, ?, ?, 'create')`,
-          [recordId, mediaId, body.remark || null, user.userId],
+             (record_id, revision_no, media_id, media_variant, remark, changed_by_user_id, change_type)
+           VALUES (?, 1, ?, ?, ?, ?, 'create')`,
+          [recordId, mediaId, body.mediaVariant, body.remark || null, user.userId],
         );
         await connection.execute(
-          `UPDATE life_module SET last_activity_at = UTC_TIMESTAMP(3), version = version + 1 WHERE module_id = ?`,
+          `UPDATE life_module SET last_activity_at = CURRENT_TIMESTAMP(3), version = version + 1 WHERE module_id = ?`,
           [moduleId],
         );
         await emit(connection, 'record', recordId, 'record.created', { recordId, moduleId });
+        await queueCheckinNotifications(connection, recordId, moduleId, user.userId);
         await refreshRecordProjections(connection, moduleId, body.recordDate);
         return {
           recordId: publicId('r', recordId),
@@ -329,6 +338,8 @@ export function recordRoutes(
       if (isDuplicateKey(error)) throw new AppError('RECORD_ALREADY_EXISTS', '该日期已经有一条记录', 409, { refreshRequired: true });
       throw error;
     }
+    await evaluateStreakRewardsSafely(pool, dbId(String(result.recordId), 'r'));
+    onMediaQueued?.();
     ok(response, result, 201);
   }));
 
@@ -361,11 +372,11 @@ export function recordRoutes(
         throw new AppError('RECORD_LOCKED', '该记录已经不能修改', 409);
       }
       const access = await requireMember(connection, String(record.module_id), user.userId, { lock: true });
-      await requireReadyMedia(connection, mediaId, user.userId, String(record.module_id), String(access.member_instance_id));
+      await requireReadyMedia(connection, mediaId, user.userId, String(record.module_id), String(access.member_instance_id), recordId);
       const [update] = await connection.execute<ResultSetHeader>(
-        `UPDATE life_record SET media_id = ?, remark = ?, version = version + 1
+        `UPDATE life_record SET media_id = ?, media_variant = ?, remark = ?, version = version + 1
           WHERE record_id = ? AND version = ?`,
-        [mediaId, body.remark || null, recordId, body.version],
+        [mediaId, body.mediaVariant, body.remark || null, recordId, body.version],
       );
       if (update.affectedRows !== 1) throw new AppError('VERSION_CONFLICT', '记录已被修改，请刷新后重试', 409);
       const [[revision]] = await connection.query<RowDataPacket[]>(
@@ -374,13 +385,13 @@ export function recordRoutes(
       );
       await connection.execute(
         `INSERT INTO record_revision
-           (record_id, revision_no, media_id, remark, changed_by_user_id, change_type)
-         VALUES (?, ?, ?, ?, ?, 'edit')`,
-        [recordId, revision.next_revision, mediaId, body.remark || null, user.userId],
+           (record_id, revision_no, media_id, media_variant, remark, changed_by_user_id, change_type)
+         VALUES (?, ?, ?, ?, ?, ?, 'edit')`,
+        [recordId, revision.next_revision, mediaId, body.mediaVariant, body.remark || null, user.userId],
       );
       await emit(connection, 'record', recordId, 'record.updated', { recordId, moduleId: record.module_id });
       await invalidateMonthlyMemoryCards(connection, String(record.module_id), sqlDate(record.record_date).slice(0, 7));
-      return { recordId: publicId('r', recordId), mediaId: publicId('media', mediaId), remark: body.remark, version: body.version + 1 };
+      return { recordId: publicId('r', recordId), mediaId: publicId('media', mediaId), mediaVariant: body.mediaVariant, remark: body.remark, version: body.version + 1 };
     });
     ok(response, result);
   }));
@@ -404,21 +415,21 @@ export function recordRoutes(
       }
       await requireMember(connection, String(record.module_id), user.userId, { lock: true });
       const [update] = await connection.execute<ResultSetHeader>(
-        `UPDATE life_record SET status = 'deleted', deleted_at = UTC_TIMESTAMP(3), version = version + 1
+        `UPDATE life_record SET status = 'deleted', deleted_at = CURRENT_TIMESTAMP(3), version = version + 1
           WHERE record_id = ? AND version = ?`,
         [recordId, body.version],
       );
       if (update.affectedRows !== 1) throw new AppError('VERSION_CONFLICT', '记录已被修改，请刷新后重试', 409);
       await connection.execute(
-        `UPDATE reaction SET status = 'cancelled', cancelled_at = UTC_TIMESTAMP(3), version = version + 1
+        `UPDATE reaction SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP(3), version = version + 1
           WHERE record_id = ? AND status = 'active'`,
         [recordId],
       );
       await connection.execute(
         `INSERT INTO record_revision
-           (record_id, revision_no, media_id, remark, changed_by_user_id, change_type)
+           (record_id, revision_no, media_id, media_variant, remark, changed_by_user_id, change_type)
          SELECT record_id, COALESCE((SELECT MAX(rr.revision_no) FROM record_revision rr WHERE rr.record_id = ?), 0) + 1,
-                media_id, remark, ?, 'delete'
+                media_id, media_variant, remark, ?, 'delete'
            FROM life_record WHERE record_id = ?`,
         [recordId, user.userId, recordId],
       );
@@ -456,7 +467,7 @@ export function recordRoutes(
       recordId: publicId('r', record.record_id),
       status: record.status,
       source: record.source,
-      stickerThumbnailUrl: record.status === 'pending' ? null : await storage.signedUrl(record.sticker_thumbnail_file_key),
+      stickerThumbnailUrl: record.status === 'pending' ? null : await storage.signedUrl(displayThumbnailKey(record)),
     })));
     const dayCount = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
     const days = Array.from({ length: dayCount }, (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`).map((date) => {
@@ -577,7 +588,7 @@ export function recordRoutes(
          ON DUPLICATE KEY UPDATE emoji_code = VALUES(emoji_code), status = 'active', cancelled_at = NULL,
            reactor_name_snapshot = VALUES(reactor_name_snapshot),
            reactor_avatar_file_key_snapshot = VALUES(reactor_avatar_file_key_snapshot),
-           version = version + 1, updated_at = UTC_TIMESTAMP(3)`,
+           version = version + 1, updated_at = CURRENT_TIMESTAMP(3)`,
         [record.module_id, recordId, user.userId, access.member_instance_id, body.emojiCode, user.nickname, user.avatarFileKey],
       );
       await emit(connection, 'record', recordId, 'reaction.changed', { recordId, reactorUserId: user.userId });
@@ -595,7 +606,7 @@ export function recordRoutes(
     const access = await requireMember(pool, String(record.module_id), user.userId);
     const result = await idempotent(pool, user.userId, 'reaction_delete', body.clientRequestId, body, async (connection) => {
       const [update] = await connection.execute<ResultSetHeader>(
-        `UPDATE reaction SET status = 'cancelled', cancelled_at = UTC_TIMESTAMP(3), version = version + 1
+        `UPDATE reaction SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP(3), version = version + 1
           WHERE record_id = ? AND reactor_member_instance_id = ? AND status = 'active'`,
         [recordId, access.member_instance_id],
       );
@@ -621,6 +632,7 @@ function processingRecordSelect(where: string): string {
   return `SELECT r.record_id, r.media_id, r.user_id, r.module_id, r.record_date,
                  r.status AS record_status, r.created_at,
                  ma.status AS media_status, ma.cutout_status, ma.content_check_status,
+                 ma.original_file_key, ma.thumbnail_file_key,
                  ma.sticker_file_key, ma.sticker_thumbnail_file_key,
                  ma.processing_attempts, ma.failure_code, ma.failure_message
             FROM life_record r JOIN media_asset ma ON ma.media_id = r.media_id ${where}`;
@@ -640,6 +652,7 @@ async function requireReadyMedia(
   userId: string,
   moduleId: string,
   memberId: string,
+  allowedRecordId?: string,
 ): Promise<MediaRow> {
   const [rows] = await connection.execute<MediaRow[]>(
     `SELECT * FROM media_asset
@@ -653,7 +666,9 @@ async function requireReadyMedia(
     throw new AppError('MEDIA_NOT_READY', '图片或贴纸尚未处理完成', 409);
   }
   const [used] = await connection.execute<RowDataPacket[]>('SELECT record_id FROM life_record WHERE media_id = ? LIMIT 1', [mediaId]);
-  if (used[0]) throw new AppError('MEDIA_ALREADY_USED', '该图片已经被使用', 409);
+  if (used[0] && String(used[0].record_id) !== allowedRecordId) {
+    throw new AppError('MEDIA_ALREADY_USED', '该图片已经被使用', 409);
+  }
   return media;
 }
 
@@ -673,9 +688,8 @@ async function loadMembers(pool: Pool, moduleId: string): Promise<MemberRow[]> {
 
 async function loadMonthRecords(pool: Pool, moduleId: string, month: string): Promise<RecordRow[]> {
   const start = `${month}-01`;
-  const endDate = new Date(`${start}T00:00:00+08:00`);
-  endDate.setUTCMonth(endDate.getUTCMonth() + 1);
-  const end = endDate.toISOString().slice(0, 10);
+  const [year, monthValue] = month.split('-').map(Number);
+  const end = `${monthValue === 12 ? year + 1 : year}-${String(monthValue === 12 ? 1 : monthValue + 1).padStart(2, '0')}-01`;
   const [rows] = await pool.execute<RecordRow[]>(
     recordSelect("WHERE r.module_id = ? AND r.record_date >= ? AND r.record_date < ? AND r.status IN ('pending', 'active', 'locked')"),
     [moduleId, start, end],
@@ -691,9 +705,13 @@ function recordSelect(where: string): string {
 }
 
 async function serializeRecord(storage: StorageService, record: RecordRow, currentUserId: string) {
-  const [stickerUrl, stickerThumbnailUrl] = await Promise.all([
+  const originalKey = originalDisplayKey(record);
+  const [stickerUrl, stickerThumbnailUrl, displayUrl, displayThumbnailUrl, originalThumbnailUrl] = await Promise.all([
     storage.signedUrl(record.sticker_file_key),
     storage.signedUrl(record.sticker_thumbnail_file_key),
+    storage.signedUrl(displayFileKey(record)),
+    storage.signedUrl(displayThumbnailKey(record)),
+    String(record.user_id) === currentUserId ? storage.signedUrl(originalKey) : Promise.resolve(null),
   ]);
   return {
     recordId: publicId('r', record.record_id),
@@ -708,10 +726,13 @@ async function serializeRecord(storage: StorageService, record: RecordRow, curre
     source: record.source,
     status: record.status,
     remark: record.remark ?? '',
+    mediaVariant: record.media_variant ?? 'sticker',
     originalUrl: null,
-    originalThumbnailUrl: null,
+    originalThumbnailUrl,
     stickerUrl,
     stickerThumbnailUrl,
+    displayUrl,
+    displayThumbnailUrl,
     firstEffectiveAt: record.first_effective_at ? isoWithShanghaiOffset(record.first_effective_at) : null,
     version: record.version,
     availableActions: String(record.user_id) === currentUserId
@@ -720,6 +741,24 @@ async function serializeRecord(storage: StorageService, record: RecordRow, curre
         : []
       : ['react'],
   };
+}
+
+function originalDisplayKey(record: {
+  original_file_key: string;
+  thumbnail_file_key: string | null;
+  sticker_thumbnail_file_key: string | null;
+}): string {
+  return record.thumbnail_file_key && record.thumbnail_file_key !== record.sticker_thumbnail_file_key
+    ? record.thumbnail_file_key
+    : record.original_file_key;
+}
+
+function displayFileKey(record: RecordRow): string {
+  return record.media_variant === 'original' ? originalDisplayKey(record) : record.sticker_file_key;
+}
+
+function displayThumbnailKey(record: RecordRow): string {
+  return record.media_variant === 'original' ? originalDisplayKey(record) : record.sticker_thumbnail_file_key;
 }
 
 function layoutSlots(count: number): string[] {
