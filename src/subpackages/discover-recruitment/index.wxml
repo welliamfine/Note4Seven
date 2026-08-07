@@ -1,0 +1,41 @@
+<view class="recruit-page">
+  <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+  <view class="recruit-header content-layer" style="padding-top: {{statusBarHeight}}px;">
+    <view class="header-control" bindtap="goBack" role="button" aria-label="返回"><image src="/assets/ui/icons/chevron-left.svg" /></view>
+    <text>一起记录</text>
+    <button class="header-share" open-type="share" aria-label="分享招募"><image src="/assets/ui/icons/share-2.svg" /></button>
+  </view>
+
+  <view class="recruit-content content-layer" style="padding-top: calc({{statusBarHeight}}px + 130rpx);">
+    <view wx:if="{{loading && !recruitment}}" class="recruit-state">正在打开招募</view>
+    <view wx:elif="{{errorMessage && !recruitment}}" class="recruit-state"><text>{{errorMessage}}</text><view bindtap="retryLoad" role="button">重新加载</view></view>
+    <block wx:else>
+      <view class="module-intro">
+        <view class="creator-row">
+          <image wx:if="{{recruitment.creator.avatarUrl}}" src="{{recruitment.creator.avatarUrl}}" mode="aspectFill" />
+          <view wx:else class="creator-fallback">记</view>
+          <text>{{recruitment.creator.name}} 发起</text>
+        </view>
+        <text class="module-name">{{recruitment.moduleName}}</text>
+        <text wx:if="{{recruitment.moduleDescription}}" class="module-description">{{recruitment.moduleDescription}}</text>
+        <text class="public-description">{{recruitment.publicDescription}}</text>
+      </view>
+
+      <view class="module-facts">
+        <view><text>记录方式</text><text>{{recruitment.recordPolicy === 'strict' ? '每日打卡' : '自由记录'}}</text></view>
+        <view><text>当前人数</text><text>{{recruitment.memberCount}} / {{recruitment.memberLimit}}</text></view>
+        <view><text>剩余名额</text><text>{{recruitment.openSlots}}</text></view>
+        <view><text>招募状态</text><text>{{recruitment.status === 'recruiting' ? '进行中' : recruitment.status === 'full' ? '成员已满' : recruitment.status === 'expired' ? '已到期' : '已结束'}}</text></view>
+      </view>
+
+      <view class="privacy-note">
+        <image src="/assets/ui/icons/shield.svg" mode="aspectFit" />
+        <text>这里仅展示招募信息。加入前不会公开成员名单、日历、贴纸或历史记录。</text>
+      </view>
+
+      <view wx:if="{{recruitment.creator.isCurrentUser}}" class="main-action secondary-action {{recruitment.status === 'recruiting' ? '' : 'disabled'}}" bindtap="closeRecruitment" role="button">{{recruitment.status === 'recruiting' ? '结束招募' : '招募已结束'}}</view>
+      <view wx:else class="main-action {{recruitment.canApply && !applying ? '' : 'disabled'}}" bindtap="apply" role="button">{{applying ? '正在提交' : recruitment.canApply ? '申请加入' : '暂时无法申请'}}</view>
+    </block>
+  </view>
+</view>
+<privacy-dialog />

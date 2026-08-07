@@ -1,6 +1,5 @@
 {
-  "enablePullDownRefresh": true,
-  "onReachBottomDistance": 240,
+  "navigationStyle": "custom",
   "usingComponents": {
     "discovery-post-card": "/components/discovery-post-card/index"
   }

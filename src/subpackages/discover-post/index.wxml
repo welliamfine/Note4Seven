@@ -1,0 +1,42 @@
+<view class="detail-page">
+  <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+  <view class="detail-header content-layer" style="padding-top: {{statusBarHeight}}px;">
+    <view class="header-control" bindtap="goBack" role="button" aria-label="返回"><image src="/assets/ui/icons/chevron-left.svg" /></view>
+    <text class="header-title">动态详情</text>
+    <view class="header-control" bindtap="openMore" role="button" aria-label="更多操作"><image src="/assets/ui/icons/ellipsis.svg" /></view>
+  </view>
+
+  <scroll-view class="detail-scroll content-layer" style="top: calc({{statusBarHeight}}px + 104rpx); height: calc(100vh - {{statusBarHeight}}px - 104rpx - 116rpx - env(safe-area-inset-bottom));" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="detail-content">
+      <view wx:if="{{loading && !post}}" class="detail-state">正在打开这条记录</view>
+      <view wx:elif="{{errorMessage && !post}}" class="detail-state">
+        <text>{{errorMessage}}</text><view bindtap="retryLoad" role="button">重新加载</view>
+      </view>
+      <block wx:else>
+        <discovery-post-card post="{{post}}" detail-mode="{{true}}" bind:like="toggleLike" bind:comment="focusComment" bind:more="openMore" bind:recruitment="openRecruitment" />
+        <view class="comments-section">
+          <text class="comments-title">评论 {{comments.length}}</text>
+          <view wx:if="{{!comments.length}}" class="comments-empty">还没有评论</view>
+          <view class="comment-row {{item.parentCommentId ? 'reply-row' : ''}}" wx:for="{{comments}}" wx:key="commentId" data-id="{{item.commentId}}" bindtap="replyComment" bindlongpress="commentMore">
+            <image wx:if="{{item.author.avatarUrl}}" class="comment-avatar" src="{{item.author.avatarUrl}}" mode="aspectFill" />
+            <view wx:else class="comment-avatar comment-avatar-fallback">{{item.author.name}}</view>
+            <view class="comment-main">
+              <view class="comment-meta"><text>{{item.author.name}}</text><text>{{item.author.isCurrentUser ? '我' : ''}}</text></view>
+              <text class="comment-content"><text wx:if="{{item.replyToName}}" class="reply-mark">回复 {{item.replyToName}}：</text>{{item.content}}</text>
+            </view>
+          </view>
+        </view>
+      </block>
+      <view class="detail-bottom-space"></view>
+    </view>
+  </scroll-view>
+
+  <view class="comment-composer content-layer">
+    <view wx:if="{{replyToName}}" class="reply-hint"><text>回复 {{replyToName}}</text><view bindtap="cancelReply" role="button">取消</view></view>
+    <view class="composer-row">
+      <input class="comment-input" value="{{commentValue}}" bindinput="updateComment" focus="{{inputFocus}}" maxlength="500" confirm-type="send" bindconfirm="sendComment" placeholder="写下你的评论" placeholder-class="text-placeholder" />
+      <view class="send-control {{commentValue && !sending ? '' : 'disabled'}}" bindtap="sendComment" role="button">{{sending ? '发送中' : '发送'}}</view>
+    </view>
+  </view>
+</view>
+<privacy-dialog />

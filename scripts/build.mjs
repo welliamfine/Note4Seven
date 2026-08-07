@@ -118,6 +118,7 @@ const excludedForRemote = new Set([
   'services/remote-client.ts',
   'services/dev-client.ts',
   'services/transport-client.ts',
+  'services/discovery-api.ts',
 ]);
 const excludedForLocal = new Set([
   'services/api.ts',
@@ -126,6 +127,7 @@ const excludedForLocal = new Set([
   'services/remote-client.ts',
   'services/dev-client.ts',
   'services/transport-client.ts',
+  'services/discovery-api.ts',
 ]);
 const excluded = apiMode === 'local' ? excludedForLocal : excludedForRemote;
 const entryPoints = typescriptFiles

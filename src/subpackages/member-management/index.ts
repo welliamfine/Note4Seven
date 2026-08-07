@@ -36,6 +36,15 @@ Page({
     }
     void wx.navigateTo({ url: `/subpackages/invite-share/index?moduleId=${this.data.moduleId}` });
   },
+  openRecruitmentPublish() {
+    if (this.data.view?.currentRole !== 'creator' || !this.data.view.inviteAvailable) {
+      wx.showToast({ title: '当前不能发起公开招募', icon: 'none' });
+      return;
+    }
+    void wx.navigateTo({
+      url: `/subpackages/discover-publish/index?mode=recruitment&moduleId=${encodeURIComponent(this.data.moduleId)}`,
+    });
+  },
   selectMember(event: WechatMiniprogram.TouchEvent) {
     const memberId = event.currentTarget.dataset.id as string;
     const member = this.data.view?.members.find((item) => item.memberInstanceId === memberId);

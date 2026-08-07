@@ -40,6 +40,7 @@ export type {
 } from './local-api';
 
 export * from './remote-api';
+export * from './discovery-api';
 
 import { remoteRequest } from './transport-client';
 import { initializeTracking } from './tracker';

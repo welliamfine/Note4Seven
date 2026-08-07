@@ -154,6 +154,18 @@ export class StorageService {
     await this.putObject(key, body, contentType);
   }
 
+  async copyObject(sourceKey: string, destinationKey: string): Promise<void> {
+    if (this.config.nodeEnv !== 'production') return;
+    const encodedSource = sourceKey.split('/').map(encodeURIComponent).join('/');
+    await this.cos.putObjectCopy({
+      Bucket: this.config.objectBucket,
+      Region: this.config.cosRegion,
+      Key: destinationKey,
+      CopySource: `${this.config.objectBucket}.cos.${this.config.cosRegion}.myqcloud.com/${encodedSource}`,
+      MetadataDirective: 'Copy',
+    });
+  }
+
   async createMemoryCardExport(input: {
     objectKey: string;
     moduleName: string;

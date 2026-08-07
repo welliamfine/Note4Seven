@@ -1,8 +1,55 @@
 <view class="page-shell discover-page">
   <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
-  <view class="discover-empty content-layer">
-    <view class="discover-icon"><view class="discover-icon-clip"><image class="discover-icon-sprite" src="/assets/ui/custom-icons/tab-sprite.png" mode="scaleToFill" /></view></view>
-    <text class="discover-title">更多记录灵感即将上线</text>
+  <view class="discover-header content-layer" style="padding-top: {{statusBarHeight}}px;">
+    <text class="discover-title">发现</text>
+  </view>
+
+  <view class="discover-content content-layer" style="padding-top: calc({{statusBarHeight}}px + 118rpx);">
+    <view wx:if="{{loading && !items.length}}" class="loading-list">
+      <view class="loading-card" wx:for="{{[1,2,3]}}" wx:key="*this"><view></view><view></view><view></view></view>
+    </view>
+
+    <view wx:elif="{{errorMessage && !items.length}}" class="state-panel">
+      <image src="/assets/ui/icons/refresh-cw.svg" mode="aspectFit" />
+      <text class="state-title">发现页暂时走神了</text>
+      <text class="state-copy">稍后再来看看，已有公开记录不会受影响。</text>
+      <view class="state-action" bindtap="retryLoad" role="button">重新加载</view>
+    </view>
+
+    <view wx:elif="{{!items.length}}" class="state-panel empty-state">
+      <view class="empty-icon"><image src="/assets/ui/custom-icons/tab-sprite.png" mode="scaleToFill" /></view>
+      <text class="state-title">这里还没有公开记录</text>
+      <text class="state-copy">从自己的记录、多人日历、回忆拼贴或彩蛋页面选择分享到发现。</text>
+    </view>
+
+    <view wx:else class="feed-list">
+      <discovery-post-card
+        wx:for="{{items}}"
+        wx:key="postId"
+        post="{{item}}"
+        bind:open="openPost"
+        bind:comment="openComments"
+        bind:like="toggleLike"
+        bind:more="openMore"
+        bind:recruitment="openRecruitment"
+      />
+      <view wx:if="{{loadingMore}}" class="load-more">正在加载更多记录</view>
+      <view wx:elif="{{!hasMore}}" class="load-more">已经看到这里了</view>
+    </view>
   </view>
 </view>
+
+<view wx:if="{{moreOpen}}" class="more-overlay" bindtap="closeMore">
+  <view class="more-sheet" catchtap="stopPropagation">
+    <view class="sheet-handle"></view>
+    <view wx:if="{{selectedPost.author.isCurrentUser}}" class="sheet-row danger" bindtap="deleteSelected" role="button">删除动态</view>
+    <block wx:else>
+      <view class="sheet-row" bindtap="dismissSelected" role="button">不感兴趣</view>
+      <view class="sheet-row" bindtap="reportSelected" role="button">举报</view>
+      <view class="sheet-row danger" bindtap="blockSelected" role="button">屏蔽这位用户</view>
+    </block>
+    <view class="sheet-row sheet-cancel" bindtap="closeMore" role="button">取消</view>
+  </view>
+</view>
+
 <privacy-dialog />

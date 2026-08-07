@@ -316,6 +316,12 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
         `UPDATE reminder_subscription SET enabled = 0, version = version + 1 WHERE module_id = ?`,
         [moduleId],
       );
+      await connection.execute(
+        `UPDATE discovery_recruitment
+            SET status = 'closed', closed_at = CURRENT_TIMESTAMP(3), version = version + 1
+          WHERE module_id = ? AND status = 'recruiting'`,
+        [moduleId],
+      );
       await audit(connection, moduleId, user.userId, 'module_delete', 'module', moduleId);
       return { moduleId: publicId('m', moduleId), status: 'pending_delete', recycleExpireAt: isoWithShanghaiOffset(expireAt) };
     });

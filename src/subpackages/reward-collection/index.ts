@@ -1,4 +1,4 @@
-import { getReceivedStreakRewards, type RevealedStreakReward } from '../../services/api';
+import { getReceivedStreakRewards, redeemStreakRewardForDiscovery, type RevealedStreakReward } from '../../services/api';
 
 type RewardFilter = 'all' | 'gift' | 'sticker';
 type CollectionItem = RevealedStreakReward & { dateRange: string };
@@ -49,6 +49,26 @@ Page({
       filter,
       visibleItems: filter === 'all' ? this.data.items : this.data.items.filter((item) => item.resultType === filter),
     });
+  },
+
+  async shareReward(event: WechatMiniprogram.TouchEvent) {
+    const rewardDrawId = String(event.currentTarget.dataset.id ?? '');
+    if (!rewardDrawId) return;
+    try {
+      const choice = await wx.showActionSheet({
+        itemList: ['分享解锁时刻', '确认已兑换并分享'],
+        alertText: '选择公开状态',
+      });
+      const stage = choice.tapIndex === 1 ? 'redeemed' : 'unlocked';
+      if (stage === 'redeemed') await redeemStreakRewardForDiscovery(rewardDrawId);
+      void wx.navigateTo({
+        url: `/subpackages/discover-publish/index?postType=easter_egg&sourceId=${encodeURIComponent(rewardDrawId)}&stage=${stage}`,
+      });
+    } catch (error) {
+      if (!String((error as { errMsg?: string }).errMsg ?? '').includes('cancel')) {
+        wx.showToast({ title: '暂时不能分享这份彩蛋', icon: 'none' });
+      }
+    }
   },
 
   goBack() { void wx.navigateBack(); },

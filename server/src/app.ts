@@ -13,6 +13,7 @@ import { accountRoutes } from './routes/account';
 import { analyticsRoutes } from './routes/analytics';
 import { authRoutes } from './routes/auth';
 import { collaborationRoutes } from './routes/collaboration';
+import { discoveryRoutes } from './routes/discovery';
 import { devStorageRoutes } from './routes/dev-storage';
 import { makeupRoutes } from './routes/makeup';
 import { mediaRoutes } from './routes/media';
@@ -115,6 +116,7 @@ export function createApp(dependencies: ApplicationDependencies) {
   }
   api.use(authRoutes(pool, config, storage, wechat));
   api.use(collaborationRoutes(pool, storage));
+  api.use(discoveryRoutes(pool, storage, wechat));
   api.use(moduleRoutes(pool, wechat, storage));
   api.use(mediaRoutes(pool, storage, dependencies.onMediaQueued));
   api.use(recordRoutes(pool, storage, wechat, dependencies.onMediaQueued));

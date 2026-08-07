@@ -380,6 +380,16 @@ function resolveJoin(pool: Pool, action: 'approve' | 'reject') {
             WHERE module_id = ?`,
           [application.module_id],
         );
+        const nextMemberCount = Number(access.active_member_count) + 1;
+        await connection.execute(
+          `UPDATE discovery_recruitment
+              SET recruitment_slots = GREATEST(0, member_limit - ?),
+                  status = IF(? >= member_limit, 'full', status),
+                  closed_at = IF(? >= member_limit, CURRENT_TIMESTAMP(3), closed_at),
+                  version = version + 1
+            WHERE module_id = ? AND status = 'recruiting'`,
+          [nextMemberCount, nextMemberCount, nextMemberCount, application.module_id],
+        );
       }
 
       const status = action === 'approve' ? 'approved' : 'rejected';

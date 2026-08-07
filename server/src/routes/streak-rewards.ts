@@ -55,6 +55,7 @@ interface DrawRow extends RowDataPacket {
   recipient_name: string;
   created_at: Date;
   revealed_at: Date | null;
+  redeemed_at: Date | null;
 }
 
 function dateValue(value: Date | string): string {
@@ -411,6 +412,31 @@ export function streakRewardRoutes(pool: Pool, storage: StorageService, wechat: 
       stickerUrl: stickerFileKey ? await storage.signedUrl(String(stickerFileKey)) : null,
       coverUrl: coverFileKey ? await storage.signedUrl(String(coverFileKey)) : null,
     });
+  }));
+
+  router.post('/streak-reward-draws/:drawId/redeem', asyncRoute(async (request, response) => {
+    const user = authUser(request);
+    const drawId = dbId(request.params.drawId, 'rd');
+    const body = parseBody(simpleWriteBody, request);
+    const result = await idempotent(pool, user.userId, 'streak_reward_redeem', body.clientRequestId, body, async (connection) => {
+      const [rows] = await connection.execute<DrawRow[]>(
+        `SELECT d.* FROM streak_reward_draw d
+          WHERE d.reward_draw_id = ? AND d.recipient_user_id = ? LIMIT 1 FOR UPDATE`,
+        [drawId, user.userId],
+      );
+      const draw = rows[0];
+      if (!draw) throw new AppError('REWARD_DRAW_NOT_FOUND', '这份奖励不存在', 404);
+      if (draw.status !== 'revealed') throw new AppError('REWARD_DRAW_NOT_REVEALED', '请先打开这份奖励', 409);
+      if (!draw.redeemed_at) {
+        await connection.execute(
+          `UPDATE streak_reward_draw SET redeemed_at = CURRENT_TIMESTAMP(3)
+            WHERE reward_draw_id = ? AND redeemed_at IS NULL`,
+          [drawId],
+        );
+      }
+      return { rewardDrawId: publicId('rd', drawId), redeemed: true };
+    });
+    ok(response, result);
   }));
 
   return router;

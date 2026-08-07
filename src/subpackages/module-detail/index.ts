@@ -926,6 +926,27 @@ Page({
     track('module_invite_share_click', { moduleId: this.data.moduleId, source: 'module_detail' });
   },
 
+  shareCalendarToDiscovery() {
+    const query = [
+      'postType=calendar',
+      `sourceId=${encodeURIComponent(`calendar_${this.data.moduleId}_${this.data.month}`)}`,
+      `moduleId=${encodeURIComponent(this.data.moduleId)}`,
+      `month=${encodeURIComponent(this.data.month)}`,
+    ].join('&');
+    track('discovery_share_source_click', { source: 'calendar', moduleId: this.data.moduleId, month: this.data.month });
+    void wx.navigateTo({ url: `/subpackages/discover-publish/index?${query}` });
+  },
+
+  async shareRecordToDiscovery(event: WechatMiniprogram.TouchEvent) {
+    const recordId = String(event.currentTarget.dataset.record ?? '');
+    if (!recordId) return;
+    await this.dismissDateSheet();
+    track('discovery_share_source_click', { source: 'record', recordId });
+    void wx.navigateTo({
+      url: `/subpackages/discover-publish/index?postType=record&sourceId=${encodeURIComponent(recordId)}`,
+    });
+  },
+
   onShareAppMessage() {
     const module = this.data.module;
     const fallback = {
