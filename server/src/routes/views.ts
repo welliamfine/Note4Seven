@@ -10,6 +10,12 @@ import { isoWithShanghaiOffset, shanghaiDate } from '../lib/time';
 import { authUser } from '../middleware/auth';
 import { requireMember } from '../services/access';
 import { idempotent } from '../services/idempotency';
+import {
+  getMemoryCollageView,
+  saveMemoryCollage,
+  type MemoryCollageTransform,
+} from '../services/memory-collage';
+import { getMemoryOverview, type MemoryReportMode } from '../services/memory-overview';
 import type { StorageService } from '../services/storage';
 
 const reminderBody = z.object({
@@ -19,10 +25,37 @@ const reminderBody = z.object({
   clientRequestId: z.string().min(8).max(64),
 });
 
+const checkinNotificationSubscriptionBody = z.object({
+  enabled: z.boolean(),
+  authorizationGranted: z.boolean(),
+  clientRequestId: z.string().min(8).max(64),
+});
+
 const writeBody = z.object({ clientRequestId: z.string().min(8).max(64) });
 const memoryBody = z.object({
   moduleId: z.string(),
   month: z.string().regex(/^\d{4}-\d{2}$/),
+  clientRequestId: z.string().min(8).max(64),
+});
+const memoryCollageItemBody = z.object({
+  assetType: z.enum(['record_sticker', 'decorative_sticker']),
+  recordId: z.string().optional(),
+  stickerAssetId: z.string().optional(),
+  x: z.number().min(-0.2).max(1.2),
+  y: z.number().min(-0.2).max(1.2),
+  width: z.number().min(0.08).max(0.7),
+  height: z.number().min(0.08).max(0.7),
+  rotation: z.number().min(-180).max(180),
+  zIndex: z.number().int().min(0).max(999),
+});
+const memoryCollageSaveBody = z.object({
+  moduleId: z.string().nullable().optional(),
+  reportMode: z.enum(['week', 'month']),
+  periodKey: z.string().min(7).max(10),
+  boardAssetId: z.string().nullable().optional(),
+  baseVersion: z.number().int().min(0),
+  force: z.boolean().optional().default(false),
+  items: z.array(memoryCollageItemBody).max(40),
   clientRequestId: z.string().min(8).max(64),
 });
 
@@ -34,6 +67,11 @@ interface ReminderRow extends RowDataPacket {
   enabled: number;
   reminder_time: string;
   subscription_status: string;
+  checkin_notify_enabled: number;
+  checkin_notify_status: string;
+  checkin_notify_credits: number;
+  checkin_notify_last_sent_at: Date | null;
+  checkin_notify_last_send_status: string | null;
   last_sent_date: Date | string | null;
   last_send_status: string | null;
   version: number;
@@ -79,6 +117,11 @@ export function viewRoutes(pool: Pool, storage: StorageService): Router {
       enabled: false,
       reminderTime: '21:00:00',
       subscriptionStatus: 'not_requested',
+      checkinNotificationsEnabled: false,
+      checkinNotificationStatus: 'not_requested',
+      checkinNotificationCredits: 0,
+      checkinNotificationLastSentAt: null,
+      checkinNotificationLastSendStatus: null,
       lastSentDate: null,
       version: 0,
     });
@@ -110,6 +153,58 @@ export function viewRoutes(pool: Pool, storage: StorageService): Router {
     ok(response, result);
   }));
 
+  router.put('/modules/:moduleId/checkin-notification-subscription', asyncRoute(async (request, response) => {
+    const user = authUser(request);
+    const moduleId = dbId(request.params.moduleId, 'm');
+    const body = parseBody(checkinNotificationSubscriptionBody, request);
+    const access = await requireMember(pool, moduleId, user.userId);
+    if (access.module_mode !== 'group') {
+      throw new AppError('GROUP_MODULE_REQUIRED', '只有多人模块可以订阅成员打卡通知', 422);
+    }
+    const result = await idempotent(
+      pool,
+      user.userId,
+      'checkin_notification_subscription_update',
+      body.clientRequestId,
+      body,
+      async (connection) => {
+        const [rows] = await connection.execute<ReminderRow[]>(
+          `SELECT * FROM reminder_subscription
+            WHERE module_id = ? AND member_instance_id = ? LIMIT 1 FOR UPDATE`,
+          [moduleId, access.member_instance_id],
+        );
+        const current = rows[0];
+        const currentCredits = Number(current?.checkin_notify_credits ?? 0);
+        const credits = !body.enabled ? 0
+          : body.authorizationGranted ? Math.min(20, currentCredits + 1) : currentCredits;
+        const enabled = body.enabled && credits > 0;
+        const status = body.authorizationGranted
+          ? 'authorized'
+          : !body.enabled ? 'disabled' : credits > 0 ? 'authorized' : 'denied';
+
+        await connection.execute(
+          `INSERT INTO reminder_subscription
+             (module_id, member_instance_id, user_id, enabled, reminder_time, subscription_status,
+              checkin_notify_enabled, checkin_notify_status, checkin_notify_credits)
+           VALUES (?, ?, ?, 0, '21:00:00', 'not_requested', ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             checkin_notify_enabled = VALUES(checkin_notify_enabled),
+             checkin_notify_status = VALUES(checkin_notify_status),
+             checkin_notify_credits = VALUES(checkin_notify_credits),
+             version = version + 1`,
+          [moduleId, access.member_instance_id, user.userId, enabled, status, credits],
+        );
+        const [updatedRows] = await connection.execute<ReminderRow[]>(
+          `SELECT * FROM reminder_subscription
+            WHERE module_id = ? AND member_instance_id = ? LIMIT 1`,
+          [moduleId, access.member_instance_id],
+        );
+        return serializeReminder(updatedRows[0]);
+      },
+    );
+    ok(response, result);
+  }));
+
   router.get('/modules/:moduleId/inbox', asyncRoute(async (request, response) => {
     const user = authUser(request);
     const moduleId = dbId(request.params.moduleId, 'm');
@@ -118,7 +213,7 @@ export function viewRoutes(pool: Pool, storage: StorageService): Router {
     const [rows] = await pool.execute<InboxRow[]>(
       `SELECT * FROM module_inbox_item
         WHERE module_id = ? AND recipient_user_id = ?
-          AND status IN ('unread', 'read') AND expire_at > UTC_TIMESTAMP(3)
+          AND status IN ('unread', 'read') AND expire_at > CURRENT_TIMESTAMP(3)
           ${cursor ? 'AND item_id < ?' : ''}
         ORDER BY item_id DESC LIMIT 21`,
       cursor ? [moduleId, user.userId, cursor] : [moduleId, user.userId],
@@ -151,7 +246,7 @@ export function viewRoutes(pool: Pool, storage: StorageService): Router {
             ON i.target_type = 'join_application' AND ja.application_id = i.target_id
           LEFT JOIN makeup_approval ma
             ON i.target_type = 'makeup_approval' AND ma.approval_id = i.target_id
-           SET i.status = 'read', i.updated_at = UTC_TIMESTAMP(3)
+           SET i.status = 'read', i.updated_at = CURRENT_TIMESTAMP(3)
          WHERE i.item_id = ? AND i.recipient_user_id = ? AND i.status = 'unread'
            AND NOT (i.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')
            AND NOT (i.target_type = 'makeup_approval' AND COALESCE(ma.status, 'pending') = 'pending')`,
@@ -170,7 +265,7 @@ export function viewRoutes(pool: Pool, storage: StorageService): Router {
               AND (i.target_type = 'join_application'
                 OR (i.type = 'member_change' AND n.type = 'member_change')
                 OR (i.type = 'makeup_result' AND n.type = 'makeup_result'))
-             SET n.is_read = 1, n.read_at = COALESCE(n.read_at, UTC_TIMESTAMP(3)), n.updated_at = UTC_TIMESTAMP(3)
+             SET n.is_read = 1, n.read_at = COALESCE(n.read_at, CURRENT_TIMESTAMP(3)), n.updated_at = CURRENT_TIMESTAMP(3)
            WHERE i.item_id = ? AND i.recipient_user_id = ? AND n.user_id = ?
              AND n.is_read = 0`,
           [itemId, user.userId, user.userId],
@@ -190,7 +285,10 @@ export function viewRoutes(pool: Pool, storage: StorageService): Router {
     const cursor = numericCursor(request.query.cursor);
     const [rows] = await pool.execute<GalleryRow[]>(
       `SELECT r.record_id, r.record_date, r.member_instance_id, r.display_name_snapshot, r.remark,
-              ma.sticker_thumbnail_file_key
+              CASE WHEN r.media_variant = 'original'
+                THEN IF(ma.thumbnail_file_key IS NULL OR ma.thumbnail_file_key = ma.sticker_thumbnail_file_key,
+                  ma.original_file_key, ma.thumbnail_file_key)
+                ELSE ma.sticker_thumbnail_file_key END AS sticker_thumbnail_file_key
          FROM life_record r JOIN media_asset ma ON ma.media_id = r.media_id
         WHERE r.module_id = ? AND DATE_FORMAT(r.record_date, '%Y-%m') = ?
           AND r.status IN ('active', 'locked') ${cursor ? 'AND r.record_id < ?' : ''}
@@ -251,28 +349,96 @@ export function viewRoutes(pool: Pool, storage: StorageService): Router {
   router.get('/memories/weekly-overview', asyncRoute(async (request, response) => {
     const user = authUser(request);
     const week = queryString(request.query.week);
-    const { start, end } = isoWeekRange(week);
-    const [[row]] = await pool.execute<RowDataPacket[]>(
-      `SELECT
-         COUNT(DISTINCT r.record_date) AS recorded_days,
-         COUNT(DISTINCT r.module_id) AS participated_module_count,
-         COUNT(*) AS weekly_record_count,
-         (SELECT COUNT(*) FROM reaction re JOIN life_record own_record ON own_record.record_id = re.record_id
-           WHERE own_record.user_id = ? AND own_record.record_date <= ?
-             AND re.status = 'active' AND re.created_at >= ? AND re.created_at < ?) AS reaction_count
-       FROM life_record r
-       WHERE r.user_id = ? AND r.status IN ('active', 'locked')
-         AND r.record_date >= ? AND r.record_date < ? AND r.record_date <= ?`,
-      [user.userId, shanghaiDate(), start, end, user.userId, start, end, shanghaiDate()],
-    );
-    ok(response, {
-      recordedDays: Number(row.recorded_days ?? 0),
-      participatedModuleCount: Number(row.participated_module_count ?? 0),
-      jointCompletedDays: 0,
-      currentStreakDays: 0,
-      receivedReactionCount: Number(row.reaction_count ?? 0),
-      weeklyRecordCount: Number(row.weekly_record_count ?? 0),
+    const { start } = isoWeekRange(week);
+    const overview = await getMemoryOverview(pool, storage, user.userId, {
+      mode: 'week',
+      period: start,
+      today: shanghaiDate(),
     });
+    ok(response, {
+      recordedDays: overview.recordedDays,
+      participatedModuleCount: overview.participatedModuleCount,
+      jointCompletedDays: overview.jointCompletedDays,
+      currentStreakDays: overview.currentStreakDays,
+      receivedReactionCount: overview.receivedReactionCount,
+      weeklyRecordCount: overview.momentCount,
+    });
+  }));
+
+  router.get('/memories/overview', asyncRoute(async (request, response) => {
+    const user = authUser(request);
+    const mode = queryString(request.query.mode) as MemoryReportMode;
+    if (mode !== 'week' && mode !== 'month') {
+      throw new AppError('VALIDATION_ERROR', '回忆报告类型不正确', 422);
+    }
+    const period = queryString(request.query.period);
+    const rawModuleId = queryString(request.query.moduleId);
+    const rawGroupSeed = queryString(request.query.group);
+    if (rawGroupSeed.length > 80) throw new AppError('VALIDATION_ERROR', '换组参数过长', 422);
+    const moduleId = rawModuleId ? dbId(rawModuleId, 'm') : undefined;
+    const overview = await getMemoryOverview(pool, storage, user.userId, {
+      mode,
+      period,
+      ...(moduleId ? { moduleId } : {}),
+      ...(rawGroupSeed ? { groupSeed: rawGroupSeed } : {}),
+      today: shanghaiDate(),
+    });
+    const collageView = await getMemoryCollageView(pool, storage, user.userId, overview, moduleId);
+    ok(response, { ...overview, collage: collageView.collage });
+  }));
+
+  router.get('/memories/collage', asyncRoute(async (request, response) => {
+    const user = authUser(request);
+    const mode = queryString(request.query.mode) as MemoryReportMode;
+    if (mode !== 'week' && mode !== 'month') {
+      throw new AppError('VALIDATION_ERROR', '回忆报告类型不正确', 422);
+    }
+    const period = queryString(request.query.period);
+    const rawModuleId = queryString(request.query.moduleId);
+    const moduleId = rawModuleId ? dbId(rawModuleId, 'm') : undefined;
+    const overview = await getMemoryOverview(pool, storage, user.userId, {
+      mode,
+      period,
+      ...(moduleId ? { moduleId } : {}),
+      today: shanghaiDate(),
+    });
+    ok(response, await getMemoryCollageView(pool, storage, user.userId, overview, moduleId));
+  }));
+
+  router.put('/memories/collage', asyncRoute(async (request, response) => {
+    const user = authUser(request);
+    const body = parseBody(memoryCollageSaveBody, request);
+    const moduleId = body.moduleId ? dbId(body.moduleId, 'm') : undefined;
+    const boardAssetId = body.boardAssetId ? dbId(body.boardAssetId, 'cboard') : undefined;
+    const items: MemoryCollageTransform[] = body.items.map((item) => ({
+      assetType: item.assetType,
+      ...(item.recordId ? { recordId: dbId(item.recordId, 'r') } : {}),
+      ...(item.stickerAssetId ? { stickerAssetId: dbId(item.stickerAssetId, 'csticker') } : {}),
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+      rotation: item.rotation,
+      zIndex: item.zIndex,
+    }));
+    await idempotent(pool, user.userId, 'memory_collage_save', body.clientRequestId, body, async (connection) => (
+      saveMemoryCollage(connection, user.userId, {
+        reportMode: body.reportMode,
+        periodKey: body.periodKey,
+        ...(moduleId ? { moduleId } : {}),
+        ...(boardAssetId ? { boardAssetId } : {}),
+        baseVersion: body.baseVersion,
+        force: body.force,
+        items,
+      })
+    ));
+    const overview = await getMemoryOverview(pool, storage, user.userId, {
+      mode: body.reportMode,
+      period: body.periodKey,
+      ...(moduleId ? { moduleId } : {}),
+      today: shanghaiDate(),
+    });
+    ok(response, await getMemoryCollageView(pool, storage, user.userId, overview, moduleId));
   }));
 
   router.get('/memories/monthly-card', asyncRoute(async (request, response) => {
@@ -413,7 +579,11 @@ async function memoryCard(pool: Pool, storage: StorageService, moduleId: string,
   const card = cards[0];
   const [[rows], [[stats]]] = await Promise.all([
     pool.execute<RowDataPacket[]>(
-      `SELECT r.record_id, ma.sticker_thumbnail_file_key
+      `SELECT r.record_id,
+              CASE WHEN r.media_variant = 'original'
+                THEN IF(ma.thumbnail_file_key IS NULL OR ma.thumbnail_file_key = ma.sticker_thumbnail_file_key,
+                  ma.original_file_key, ma.thumbnail_file_key)
+                ELSE ma.sticker_thumbnail_file_key END AS sticker_thumbnail_file_key
          FROM monthly_memory_card_item mci
          JOIN life_record r ON r.record_id = mci.record_id
          JOIN media_asset ma ON ma.media_id = r.media_id
@@ -463,6 +633,13 @@ function serializeReminder(row: ReminderRow) {
     enabled: Boolean(row.enabled),
     reminderTime: row.reminder_time,
     subscriptionStatus: row.subscription_status,
+    checkinNotificationsEnabled: Boolean(row.checkin_notify_enabled),
+    checkinNotificationStatus: row.checkin_notify_status,
+    checkinNotificationCredits: Number(row.checkin_notify_credits),
+    checkinNotificationLastSentAt: row.checkin_notify_last_sent_at
+      ? isoWithShanghaiOffset(row.checkin_notify_last_sent_at)
+      : null,
+    checkinNotificationLastSendStatus: row.checkin_notify_last_send_status,
     lastSentDate: row.last_sent_date ? sqlDate(row.last_sent_date) : null,
     lastSendStatus: row.last_send_status,
     version: row.version,
@@ -484,7 +661,7 @@ function isoWeekRange(value: string): { start: string; end: string } {
 }
 
 function targetId(type: string, id: string): string {
-  const prefixes: Record<string, string> = { join_application: 'ja', makeup_approval: 'ma', record: 'r', member: 'mi', module: 'm' };
+  const prefixes: Record<string, string> = { join_application: 'ja', makeup_approval: 'ma', record: 'r', member: 'mi', module: 'm', reward_draw: 'rd' };
   return publicId(prefixes[type] ?? type, id);
 }
 

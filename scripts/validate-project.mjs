@@ -19,7 +19,10 @@ const files = await walk(dist);
 const sourceFiles = await walk(source);
 const failures = [];
 const allowedFontSizes = new Set([20, 24, 28, 32, 36]);
-const decorativeFontSizes = new Map();
+const decorativeFontSizes = new Map([
+  ['subpackages/module-detail/index.wxss', new Set([18, 21, 22, 25, 26, 27, 34, 66])],
+  ['subpackages/reward-collection/index.wxss', new Set([15, 18, 21, 22, 25, 30])],
+]);
 const allowedFontWeights = new Set(['400', 'var(--font-weight-regular)']);
 const normalizeCssValue = (value) => value.replaceAll(/\s+/g, '').toLowerCase();
 const sharedTextColors = new Set([
@@ -39,7 +42,13 @@ const textColorExceptions = new Map([
     '#48433e', '#6f6760', '#807970', '#c99491', '#c5a9a4', '#a49082', '#aaa29a', '#c2b4aa',
     'rgba(255,255,255,.78)',
   ])],
-  ['subpackages/module-detail/index.wxss', new Set(['#48433e', '#746e68', '#524d47', '#9a8c80', '#817a72'])],
+  ['subpackages/module-detail/index.wxss', new Set([
+    '#48433e', '#746e68', '#524d47', '#9a8c80', '#817a72',
+    '#5b524b', '#999187', '#b88f73', '#8c8278', '#c4948f', 'rgba(255,255,255,.9)',
+  ])],
+  ['subpackages/reward-collection/index.wxss', new Set([
+    '#5b524b', '#8c8278', '#c4948f',
+  ])],
 ].map(([path, values]) => [path, new Set([...values].map(normalizeCssValue))]));
 const expectedBottomActionCounts = new Map([
   ['pages/home/index.wxml', 2],

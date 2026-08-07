@@ -49,6 +49,42 @@
     {
       "file": "012_module_record_policy.sql",
       "sha256": "5f8f30826d73226dfe50eae276fd64461fe9fc63d0f8d3e13dfede4d54b54757"
+    },
+    {
+      "file": "013_streak_rewards.sql",
+      "sha256": "6d17188aa7b5f1642ea8b6e829af30ce8ed983e72fcd006abacab2502d5ed0b4"
+    },
+    {
+      "file": "014_checkin_notifications.sql",
+      "sha256": "49e4d8ae1579a9d85ad452879220336d1ca3f0a0eb1535c8326a2588db748462"
+    },
+    {
+      "file": "015_convert_database_times_to_beijing.sql",
+      "sha256": "160f27207df1fc1476fee147873d097a61cfeb8550dcb96b3f54ed3ed0532def"
+    },
+    {
+      "file": "016_flexible_streak_reward_rules.sql",
+      "sha256": "32f3ff256685d22083dcb1e24031df4874429f84c4e270255a08541df1b3bcbb"
+    },
+    {
+      "file": "017_record_media_variant.sql",
+      "sha256": "8a7bacd0623c8d0622023b75adf9a6026e8c7aa7938da27d716c28f8c86e2308"
+    },
+    {
+      "file": "018_streak_reward_cover.sql",
+      "sha256": "66ed8e5ae9221c9660b4f3029c90db96c73417e303f2c610b5b410ec6a151f03"
+    },
+    {
+      "file": "019_memory_collage_editor.sql",
+      "sha256": "42a36e76889642048823233a8aac0f28e7a072c818dae591f25f97307bc18f6b"
+    },
+    {
+      "file": "020_memory_collage_assets.sql",
+      "sha256": "bb3c7cf371b5158375333b247ead2d75f2fde767747907c41c32d84e21c5a0a9"
+    },
+    {
+      "file": "021_memory_collage_fixed_board_bounds.sql",
+      "sha256": "15eb3a0267990b77b702f26c9ac3271cb82fbf5aea105aa79d531e675486fe5d"
     }
   ]
 }

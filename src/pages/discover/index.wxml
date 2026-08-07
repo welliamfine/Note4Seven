@@ -1,7 +1,7 @@
 <view class="page-shell discover-page">
   <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
   <view class="discover-empty content-layer">
-    <view class="discover-icon"><image src="/assets/ui/icons/compass.svg" /></view>
+    <view class="discover-icon"><view class="discover-icon-clip"><image class="discover-icon-sprite" src="/assets/ui/custom-icons/tab-sprite.png" mode="scaleToFill" /></view></view>
     <text class="discover-title">更多记录灵感即将上线</text>
   </view>
 </view>

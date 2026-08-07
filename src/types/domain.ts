@@ -8,7 +8,11 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | '
 export type InviteStatus = 'active' | 'expired' | 'invalid_module';
 export type JoinApplicationStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'cancelled';
 export type ModuleStatus = 'active' | 'pending_delete';
-export type ReminderSubscriptionStatus = 'not_requested' | 'authorized' | 'denied';
+export type ReminderSubscriptionStatus = 'not_requested' | 'authorized' | 'denied' | 'unavailable' | 'exhausted';
+export type CheckinNotificationSubscriptionStatus = 'not_requested' | 'authorized' | 'denied' | 'exhausted' | 'disabled';
+export type StreakRewardTargetType = 'all' | 'member';
+export type StreakRewardRuleStatus = 'active' | 'triggered' | 'cancelled' | 'expired';
+export type StreakRewardResultType = 'gift' | 'sticker';
 
 export interface User {
   userId: string;
@@ -52,8 +56,64 @@ export interface ReminderSubscription {
   reminderTime: string;
   inAppEnabled: boolean;
   subscriptionStatus: ReminderSubscriptionStatus;
+  checkinNotificationsEnabled?: boolean;
+  checkinNotificationStatus?: CheckinNotificationSubscriptionStatus;
+  checkinNotificationCredits?: number;
+  checkinNotificationLastSentAt?: string;
+  checkinNotificationLastSendStatus?: 'queued' | 'retrying' | 'sent' | 'failed';
   paused: boolean;
   lastSentDate?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StreakRewardRule {
+  rewardRuleId: string;
+  moduleId: string;
+  sponsorUserId: string;
+  sponsorMemberInstanceId: string;
+  targetType: StreakRewardTargetType;
+  targetMemberInstanceId?: string;
+  coverMediaId?: string;
+  coverPath?: string;
+  prizeTitle: string;
+  prizeDescription: string;
+  winProbability: 20 | 50 | 80 | 100;
+  streakDays: number;
+  status: StreakRewardRuleStatus;
+  expiresAt: string;
+  triggeredAt?: string;
+  cancelledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StreakRewardEvent {
+  rewardEventId: string;
+  rewardRuleId: string;
+  moduleId: string;
+  triggerRecordId: string;
+  sponsorNameSnapshot: string;
+  targetType: StreakRewardTargetType;
+  coverPathSnapshot?: string;
+  prizeTitleSnapshot: string;
+  prizeDescriptionSnapshot: string;
+  winProbability: number;
+  windowStart: string;
+  windowEnd: string;
+  createdAt: string;
+}
+
+export interface StreakRewardDraw {
+  rewardDrawId: string;
+  rewardEventId: string;
+  moduleId: string;
+  recipientUserId: string;
+  recipientMemberInstanceId: string;
+  resultType: StreakRewardResultType;
+  stickerRecordId?: string;
+  status: 'sealed' | 'revealed';
+  revealedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -106,6 +166,8 @@ export interface LifeRecord {
   recordDate: string;
   originalPath: string;
   stickerPath: string;
+  generatedStickerPath?: string;
+  mediaVariant?: 'sticker' | 'original';
   remark: string;
   source: 'normal' | 'makeup';
   status: RecordStatus;
@@ -180,11 +242,11 @@ export interface JoinApplication {
 export interface AppNotification {
   notificationId: string;
   userId: string;
-  type: 'join_application' | 'join_result' | 'member_change' | 'member_removed' | 'creator_transferred' | 'reaction' | 'makeup_approval' | 'makeup_result' | 'module_state' | 'reminder' | 'account';
+  type: 'join_application' | 'join_result' | 'member_change' | 'member_removed' | 'creator_transferred' | 'reaction' | 'makeup_approval' | 'makeup_result' | 'module_state' | 'reminder' | 'reward_result' | 'account';
   title: string;
   content: string;
   moduleId?: string;
-  targetType?: 'module' | 'join_application' | 'makeup_approval' | 'record' | 'member';
+  targetType?: 'module' | 'join_application' | 'makeup_approval' | 'record' | 'member' | 'reward_draw';
   targetId?: string;
   recordDate?: string;
   actionType: 'none' | 'approve_join' | 'approve_makeup';
@@ -244,6 +306,9 @@ export interface AppDatabase {
   reminders: ReminderSubscription[];
   dailySnapshots: DailyModuleSnapshot[];
   monthlyMemoryCards: MonthlyMemoryCard[];
+  streakRewardRules: StreakRewardRule[];
+  streakRewardEvents: StreakRewardEvent[];
+  streakRewardDraws: StreakRewardDraw[];
   accountDeletionRequest?: AccountDeletionRequest;
   privacyVersion: string;
   idempotency: Record<string, string>;
@@ -322,6 +387,7 @@ export interface CheckinProcessingStatus {
   canLeave: boolean;
   elapsedMs: number;
   stickerUrl?: string;
+  originalUrl?: string;
   retryable: boolean;
   message?: string;
 }

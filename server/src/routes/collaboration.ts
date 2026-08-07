@@ -194,7 +194,7 @@ export function collaborationRoutes(pool: Pool, storage: StorageService): Router
     const result = await idempotent(pool, user.userId, 'invite_revoke_all', body.clientRequestId, body, async (connection) => {
       await requireMember(connection, moduleId, user.userId, { creator: true, lock: true });
       const [update] = await connection.execute<ResultSetHeader>(
-        `UPDATE invite_token SET status = 'revoked', revoked_at = UTC_TIMESTAMP(3)
+        `UPDATE invite_token SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP(3)
           WHERE module_id = ? AND status = 'active'`,
         [moduleId],
       );
@@ -376,7 +376,7 @@ function resolveJoin(pool: Pool, action: 'approve' | 'reject') {
         await connection.execute(
           `UPDATE life_module
               SET active_member_count = active_member_count + 1, next_join_sequence = next_join_sequence + 1,
-                  mode = 'group', group_activated_at = COALESCE(group_activated_at, UTC_TIMESTAMP(3)), version = version + 1
+                  mode = 'group', group_activated_at = COALESCE(group_activated_at, CURRENT_TIMESTAMP(3)), version = version + 1
             WHERE module_id = ?`,
           [application.module_id],
         );
@@ -385,8 +385,8 @@ function resolveJoin(pool: Pool, action: 'approve' | 'reject') {
       const status = action === 'approve' ? 'approved' : 'rejected';
       await connection.execute(
         `UPDATE join_application
-            SET status = ?, resolved_at = UTC_TIMESTAMP(3), resolved_by_user_id = ?, result_member_instance_id = ?,
-                reapply_allowed_at = ${action === 'reject' ? 'DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 24 HOUR)' : 'NULL'},
+            SET status = ?, resolved_at = CURRENT_TIMESTAMP(3), resolved_by_user_id = ?, result_member_instance_id = ?,
+                reapply_allowed_at = ${action === 'reject' ? 'DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 24 HOUR)' : 'NULL'},
                 version = version + 1
           WHERE application_id = ? AND status = 'pending'`,
         [status, user.userId, memberId, applicationId],
@@ -396,8 +396,8 @@ function resolveJoin(pool: Pool, action: 'approve' | 'reject') {
             SET type = 'join_result', title = ?, content = ?,
                 action_type = 'none', action_status = 'none',
                 is_read = IF(user_id = ?, 1, 0),
-                read_at = IF(user_id = ?, COALESCE(read_at, UTC_TIMESTAMP(3)), NULL),
-                updated_at = UTC_TIMESTAMP(3)
+                read_at = IF(user_id = ?, COALESCE(read_at, CURRENT_TIMESTAMP(3)), NULL),
+                updated_at = CURRENT_TIMESTAMP(3)
           WHERE target_type = 'join_application' AND target_id = ?`,
         [action === 'approve' ? '成员已加入' : '加入申请未通过',
           action === 'approve'
@@ -408,7 +408,7 @@ function resolveJoin(pool: Pool, action: 'approve' | 'reject') {
       await connection.execute(
         `UPDATE module_inbox_item
             SET title = ?, content = ?, status = IF(recipient_user_id = ?, 'read', 'unread'),
-                updated_at = UTC_TIMESTAMP(3), expire_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 30 DAY)
+                updated_at = CURRENT_TIMESTAMP(3), expire_at = DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 30 DAY)
           WHERE target_type = 'join_application' AND target_id = ? AND status IN ('unread', 'read')`,
         [action === 'approve' ? '成员已加入' : '加入申请未通过',
           action === 'approve'
@@ -424,7 +424,7 @@ function resolveJoin(pool: Pool, action: 'approve' | 'reject') {
              (module_id, recipient_user_id, type, title, content, target_type, target_id,
               status, dedupe_key, expire_at)
            SELECT ?, user_id, 'member_change', '成员已加入', ?, 'member', ?,
-                  'unread', ?, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 30 DAY)
+                  'unread', ?, DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 30 DAY)
              FROM module_member
             WHERE module_id = ? AND status = 'active' AND user_id <> ?`,
           [application.module_id, joinContent, memberId, dedupeKey, application.module_id,
@@ -574,20 +574,20 @@ async function deactivateMember(
   await connection.execute(
     `UPDATE reaction re
        JOIN life_record r ON r.record_id = re.record_id
-        SET re.status = 'cancelled', re.cancelled_at = UTC_TIMESTAMP(3), re.version = re.version + 1
+        SET re.status = 'cancelled', re.cancelled_at = CURRENT_TIMESTAMP(3), re.version = re.version + 1
       WHERE r.member_instance_id = ? AND r.record_date = ?
         AND r.status IN ('pending', 'active', 'locked') AND re.status = 'active'`,
     [member.member_instance_id, today],
   );
   await connection.execute(
     `UPDATE life_record
-        SET status = 'deleted', deleted_at = UTC_TIMESTAMP(3), version = version + 1
+        SET status = 'deleted', deleted_at = CURRENT_TIMESTAMP(3), version = version + 1
       WHERE member_instance_id = ? AND record_date = ?
         AND status IN ('pending', 'active', 'locked')`,
     [member.member_instance_id, today],
   );
   await connection.execute(
-    `UPDATE module_member SET status = ?, left_at = UTC_TIMESTAMP(3), leave_reason = ?, version = version + 1
+    `UPDATE module_member SET status = ?, left_at = CURRENT_TIMESTAMP(3), leave_reason = ?, version = version + 1
       WHERE member_instance_id = ? AND status = 'active'`,
     [reason === 'removed' ? 'removed' : 'exited', reason, member.member_instance_id],
   );
@@ -602,6 +602,13 @@ async function deactivateMember(
     [member.member_instance_id],
   );
   await connection.execute(`UPDATE reminder_subscription SET enabled = 0 WHERE member_instance_id = ?`, [member.member_instance_id]);
+  await connection.execute(
+    `UPDATE streak_reward_rule
+        SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP(3), version = version + 1
+      WHERE module_id = ? AND status = 'active'
+        AND (sponsor_member_instance_id = ? OR target_member_instance_id = ?)`,
+    [member.module_id, member.member_instance_id, member.member_instance_id],
+  );
 }
 
 async function notifyRemainingMembersOfDeparture(
@@ -617,7 +624,7 @@ async function notifyRemainingMembersOfDeparture(
         status, dedupe_key, expire_at)
      SELECT mm.module_id, mm.user_id, 'member_change', '成员退出',
             CONCAT('「', ?, '」已退出「', m.name, '」'), 'member', ?,
-            'unread', ?, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 30 DAY)
+            'unread', ?, DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 30 DAY)
        FROM module_member mm
        JOIN life_module m ON m.module_id = mm.module_id
       WHERE mm.module_id = ? AND mm.status = 'active'`,

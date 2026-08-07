@@ -52,10 +52,10 @@ export async function recalculateDailySnapshot(
     `INSERT INTO daily_module_snapshot
        (module_id, record_date, required_member_count, completed_member_count, is_all_completed,
         calculation_version, calculated_at)
-     VALUES (?, ?, ?, ?, ?, 1, UTC_TIMESTAMP(3))
+     VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP(3))
      ON DUPLICATE KEY UPDATE completed_member_count = VALUES(completed_member_count),
        is_all_completed = VALUES(is_all_completed), calculation_version = calculation_version + 1,
-       calculated_at = UTC_TIMESTAMP(3)`,
+       calculated_at = CURRENT_TIMESTAMP(3)`,
     [moduleId, recordDate, members.length, completed, allCompleted],
   );
   const [currentSnapshots] = await executor.execute<RowDataPacket[]>(

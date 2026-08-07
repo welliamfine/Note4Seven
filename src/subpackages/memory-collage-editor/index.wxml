@@ -1,0 +1,219 @@
+<view class="collage-editor-page" style="padding-top: {{statusBarHeight}}px;">
+  <image class="editor-page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+
+  <view class="editor-top-bar">
+    <view class="editor-icon-button" role="button" bindtap="closeEditor" hover-class="editor-control-pressed" aria-label="关闭">
+      <image src="/assets/ui/icons/x.svg" mode="aspectFit" />
+    </view>
+    <text class="editor-title">{{title}}</text>
+    <view
+      class="editor-icon-button {{loading || exporting ? 'disabled' : ''}}"
+      role="button"
+      bindtap="requestExport"
+      hover-class="editor-control-pressed"
+      aria-disabled="{{loading || exporting}}"
+      aria-label="导出到相册"
+    >
+      <image src="/assets/ui/icons/download.svg" mode="aspectFit" />
+    </view>
+  </view>
+
+  <view class="editor-workspace">
+    <view class="collage-editor-board {{boardImagePath ? 'has-board-background' : 'has-fallback-background'}}" catchtap="clearSelection">
+      <image
+        wx:if="{{boardImagePath}}"
+        class="editor-board-background"
+        src="{{boardImagePath}}"
+        mode="scaleToFill"
+        style="{{boardBackgroundStyle}}"
+        aria-hidden="true"
+      />
+      <view wx:else class="editor-board-fallback" aria-hidden="true">
+        <image src="/assets/ui/material-texture.jpg" mode="aspectFill" />
+      </view>
+
+      <movable-area class="editor-sticker-movable-area" style="{{movableAreaStyle}}">
+        <movable-view
+          class="editor-collage-item"
+          wx:for="{{items}}"
+          wx:key="itemId"
+          data-id="{{item.itemId}}"
+          style="{{item.frameStyle}}"
+          x="{{item.moveX}}"
+          y="{{item.moveY}}"
+          direction="all"
+          inertia="{{false}}"
+          out-of-bounds="{{false}}"
+          disabled="{{transformingItemId === item.itemId}}"
+          bindchange="onStickerPositionChange"
+          catchtap="selectItem"
+          bindtouchstart="onStickerTouchStart"
+          bindtouchend="onStickerTouchEnd"
+          bindtouchcancel="onStickerTouchEnd"
+        >
+          <view
+            class="editor-collage-content {{selectedItemId === item.itemId ? 'selected' : ''}} {{draggingItemId === item.itemId ? 'gesture-active' : ''}}"
+            style="{{item.rotationStyle}}"
+          >
+            <image class="editor-collage-image sticker-outline-medium" src="{{item.displayPath}}" mode="aspectFit" webp />
+            <view
+              wx:if="{{selectedItemId === item.itemId}}"
+              class="item-delete-handle"
+              role="button"
+              data-id="{{item.itemId}}"
+              catchtouchstart="stopPropagation"
+              catchtouchend="deleteItem"
+              catchtouchcancel="stopPropagation"
+              aria-label="删除贴纸"
+            >
+              <image src="/assets/ui/icons/x.svg" mode="aspectFit" />
+            </view>
+            <view
+              wx:if="{{selectedItemId === item.itemId}}"
+              class="item-transform-handle"
+              role="button"
+              data-id="{{item.itemId}}"
+              catchtouchstart="onTransformHandleTouchStart"
+              catchtouchmove="onTransformHandleTouchMove"
+              catchtouchend="onStickerTouchEnd"
+              catchtouchcancel="onStickerTouchEnd"
+              aria-label="旋转和缩放"
+            >
+              <image src="/assets/ui/icons/rotate-ccw.svg" mode="aspectFit" />
+            </view>
+          </view>
+        </movable-view>
+      </movable-area>
+
+      <view wx:if="{{selectedItemId}}" class="editor-layer-controls" catchtap="stopPropagation">
+        <view class="editor-layer-button" role="button" catchtap="sendSelectedToBack" hover-class="editor-control-pressed">置底</view>
+        <view class="editor-layer-button" role="button" catchtap="copySelected" hover-class="editor-control-pressed">复制</view>
+        <view class="editor-layer-button" role="button" catchtap="bringSelectedToFront" hover-class="editor-control-pressed">置顶</view>
+      </view>
+
+      <view wx:if="{{loading}}" class="editor-board-loading">
+        <view></view><view></view><view></view>
+      </view>
+    </view>
+
+    <view class="editor-canvas-actions">
+      <view
+        class="editor-clear-button {{loading || !items.length ? 'disabled' : ''}}"
+        role="button"
+        bindtap="requestClear"
+        hover-class="editor-control-pressed"
+        aria-disabled="{{loading || !items.length}}"
+      >
+        <view class="editor-action-icon"><image class="editor-action-icon-sprite" src="/subpackages/assets/ui/custom-icons/collage-clear.png" mode="scaleToFill" /></view>
+        <text>清空</text>
+      </view>
+      <view
+        class="editor-save-button {{loading || saving ? 'disabled' : ''}}"
+        role="button"
+        bindtap="saveEditor"
+        hover-class="editor-control-pressed"
+        aria-disabled="{{loading || saving}}"
+      >
+        <view wx:if="{{saving}}" class="editor-save-spinner"></view>
+        <view wx:else class="editor-action-icon"><image class="editor-action-icon-sprite" src="/subpackages/assets/ui/custom-icons/collage-save.png" mode="scaleToFill" /></view>
+        <text>{{saving ? '保存中' : '保存'}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="editor-asset-drawer">
+    <view class="editor-asset-tabs">
+      <view class="editor-asset-tab {{activeAssetTab === 'board' ? 'selected' : ''}}" role="button" data-tab="board" bindtap="setAssetTab" hover-class="editor-control-pressed">画板</view>
+      <view class="editor-asset-tab {{activeAssetTab === 'record' ? 'selected' : ''}}" role="button" data-tab="record" bindtap="setAssetTab" hover-class="editor-control-pressed">打卡贴纸</view>
+      <view class="editor-asset-tab {{activeAssetTab === 'decorative' ? 'selected' : ''}}" role="button" data-tab="decorative" bindtap="setAssetTab" hover-class="editor-control-pressed">装饰贴纸</view>
+    </view>
+
+    <scroll-view wx:if="{{activeAssetTab === 'record'}}" class="editor-asset-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view wx:if="{{recordStickers.length}}" class="editor-record-grid">
+        <view
+          class="editor-record-asset {{item.added ? 'added' : ''}}"
+          role="button"
+          wx:for="{{recordStickers}}"
+          wx:key="recordId"
+          data-id="{{item.recordId}}"
+          bindtap="addRecordSticker"
+          hover-class="editor-control-pressed"
+        >
+          <image class="sticker-outline-medium" src="{{item.stickerPath}}" mode="aspectFit" webp />
+          <text>{{item.added ? item.dateLabel : '未添加'}}</text>
+        </view>
+      </view>
+      <view wx:else class="editor-asset-empty"><text>本周期暂无打卡贴纸</text></view>
+      <text wx:if="{{recordStickers.length}}" class="editor-asset-count">已添加 {{collageItemCount}} / 20</text>
+    </scroll-view>
+
+    <scroll-view wx:elif="{{activeAssetTab === 'board'}}" class="editor-asset-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view wx:if="{{boards.length}}" class="editor-board-grid">
+        <view
+          class="editor-board-asset {{boardAssetId === item.boardAssetId ? 'selected' : ''}}"
+          role="button"
+          wx:for="{{boards}}"
+          wx:key="boardAssetId"
+          data-id="{{item.boardAssetId}}"
+          bindtap="selectBoard"
+          hover-class="editor-control-pressed"
+        >
+          <image src="{{item.thumbnailPath}}" mode="scaleToFill" style="{{item.backgroundStyle}}" />
+        </view>
+      </view>
+      <view wx:else class="editor-asset-empty"><text>暂无可选画板</text></view>
+    </scroll-view>
+
+    <view wx:else class="editor-decoration-panel">
+      <scroll-view wx:if="{{decorativeCategories.length}}" class="editor-decoration-categories" scroll-x enhanced show-scrollbar="{{false}}">
+        <view class="editor-decoration-category {{decorativeCategory === 'all' ? 'selected' : ''}}" role="button" data-category="all" bindtap="setDecorativeCategory" hover-class="editor-control-pressed">全部</view>
+        <view
+          class="editor-decoration-category {{decorativeCategory === item ? 'selected' : ''}}"
+          role="button"
+          wx:for="{{decorativeCategories}}"
+          wx:key="*this"
+          data-category="{{item}}"
+          bindtap="setDecorativeCategory"
+          hover-class="editor-control-pressed"
+        >{{item}}</view>
+      </scroll-view>
+      <scroll-view
+        class="editor-decoration-scroll"
+        scroll-y
+        enhanced
+        show-scrollbar="{{false}}"
+        lower-threshold="160"
+        bindscrolltolower="loadMoreDecorativeStickers"
+      >
+        <view wx:if="{{visibleDecorativeStickers.length}}" class="editor-decoration-grid">
+          <view
+            class="editor-decoration-asset"
+            role="button"
+            wx:for="{{visibleDecorativeStickers}}"
+            wx:key="stickerAssetId"
+            data-id="{{item.stickerAssetId}}"
+            bindtap="addDecorativeSticker"
+            hover-class="editor-control-pressed"
+          >
+            <image src="{{item.thumbnailPath}}" mode="aspectFit" />
+          </view>
+        </view>
+        <view wx:else class="editor-asset-empty"><text>暂无装饰贴纸</text></view>
+      </scroll-view>
+    </view>
+  </view>
+
+  <canvas canvas-id="collageEditorExportCanvas" class="editor-export-canvas"></canvas>
+</view>
+<privacy-dialog />
+
+<view wx:if="{{dialogOpen}}" class="editor-dialog-overlay" catchtouchmove="stopPropagation">
+  <view class="editor-dialog" catchtap="stopPropagation">
+    <text class="editor-dialog-title">{{dialogTitle}}</text>
+    <text class="editor-dialog-message">{{dialogMessage}}</text>
+    <view class="editor-dialog-actions {{dialogShowCancel ? '' : 'single'}}">
+      <view wx:if="{{dialogShowCancel}}" class="editor-dialog-button editor-dialog-secondary" role="button" bindtap="cancelDialog" hover-class="editor-control-pressed">{{dialogCancelText}}</view>
+      <view class="editor-dialog-button editor-dialog-primary" role="button" bindtap="confirmDialog" hover-class="editor-control-pressed">{{dialogConfirmText}}</view>
+    </view>
+  </view>
+</view>

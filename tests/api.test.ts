@@ -14,6 +14,10 @@ import {
   getModuleInbox,
   getModuleMonthSummary,
   getModuleReminder,
+  getMyStreakRewardRule,
+  getPendingStreakReward,
+  getPendingStreakRewards,
+  getReceivedStreakRewards,
   getNotifications,
   getProfileOverview,
   getPrivacyView,
@@ -26,8 +30,11 @@ import {
   resolveJoinApplication,
   resolveMakeupApproval,
   restoreRecycledModule,
+  previewStreakReward,
+  revealStreakReward,
   runInAppReminderScan,
   saveRecord,
+  saveStreakRewardRule,
   setRecordReaction,
   submitJoinApplication,
   submitMakeupRecord,
@@ -162,6 +169,46 @@ describe('Alpha service contract', () => {
     expect((await getModule('module_dinner')).members).toHaveLength(3);
   });
 
+  it('keeps both generated assets and displays the selected original without regenerating', async () => {
+    const module = await createModule({
+      name: '原图记录',
+      description: '',
+      recordPolicy: 'relaxed',
+      clientRequestId: 'original_variant_module',
+    });
+    const originalPath = 'wxfile://compressed-original.jpg';
+    const generatedStickerPath = STICKER_PATHS[2];
+    const created = await saveRecord({
+      moduleId: module.moduleId,
+      recordDate: shanghaiDate(),
+      originalPath,
+      stickerPath: generatedStickerPath,
+      mediaVariant: 'original',
+      remark: '',
+      clientRequestId: 'original_variant_record',
+    });
+
+    expect(created).toMatchObject({
+      originalPath,
+      stickerPath: originalPath,
+      generatedStickerPath,
+      mediaVariant: 'original',
+    });
+
+    const switched = await saveRecord({
+      moduleId: module.moduleId,
+      recordId: created.recordId,
+      recordDate: created.recordDate,
+      originalPath,
+      stickerPath: generatedStickerPath,
+      mediaVariant: 'sticker',
+      remark: '',
+      clientRequestId: 'sticker_variant_record',
+    });
+    expect(switched.stickerPath).toBe(generatedStickerPath);
+    expect(switched.generatedStickerPath).toBe(generatedStickerPath);
+  });
+
   it('migrates existing modules to strict and keeps strict date rules unchanged', async () => {
     expect(readDatabase().modules.every((module) => module.recordPolicy === 'strict')).toBe(true);
     const yesterday = addDays(shanghaiDate(), -1);
@@ -264,6 +311,193 @@ describe('Alpha service contract', () => {
     expect([...home.pinned, ...home.normal].some((item) => item.moduleId === 'module_coffee')).toBe(false);
   });
 
+  it('creates a one-time seven-day reward and keeps the reveal result stable', async () => {
+    const module = await createModule({
+      name: '晨间打卡', description: '', recordPolicy: 'strict', clientRequestId: 'reward_module_create',
+    });
+    const today = shanghaiDate();
+    const member = (await getModule(module.moduleId)).members[0];
+    updateDatabase((database) => {
+      const currentModule = database.modules.find((item) => item.moduleId === module.moduleId)!;
+      currentModule.members[0].joinedAt = `${addDays(today, -10)}T08:00:00+08:00`;
+      for (let offset = 6; offset >= 1; offset -= 1) {
+        const recordDate = addDays(today, -offset);
+        database.records.push({
+          recordId: `reward_history_${offset}`,
+          moduleId: module.moduleId,
+          memberInstanceId: member.memberInstanceId,
+          userId: member.userId,
+          recordDate,
+          originalPath: STICKER_PATHS[offset % STICKER_PATHS.length],
+          stickerPath: STICKER_PATHS[offset % STICKER_PATHS.length],
+          remark: '',
+          source: 'normal',
+          status: 'locked',
+          firstEffectiveAt: `${recordDate}T08:00:00+08:00`,
+          updatedAt: `${recordDate}T08:00:00+08:00`,
+        });
+      }
+    });
+    const configured = await saveStreakRewardRule(module.moduleId, {
+      targetType: 'member',
+      targetMemberInstanceId: member.memberInstanceId,
+      streakDays: 7,
+      prizeTitle: '一杯奶茶',
+      prizeDescription: '周末一起去兑换',
+      coverMediaId: 'media_reward_cover',
+      coverPath: '/subpackages/reward-assets/default-cover.png',
+      winProbability: 100,
+      termsAccepted: true,
+    });
+    expect(configured.rules[0]?.rule).toMatchObject({
+      status: 'active', streakDays: 7, winProbability: 100,
+      coverMediaId: 'media_reward_cover', coverPath: '/subpackages/reward-assets/default-cover.png',
+    });
+    expect((await getMyStreakRewardRule(module.moduleId)).rules[0]?.progressDays).toBe(6);
+
+    await saveRecord({
+      moduleId: module.moduleId,
+      recordDate: today,
+      originalPath: STICKER_PATHS[0],
+      stickerPath: STICKER_PATHS[0],
+      remark: '',
+      clientRequestId: 'reward_seventh_record',
+    });
+    const pending = await getPendingStreakReward(module.moduleId);
+    expect(pending).toMatchObject({ targetType: 'member', streakDays: 7, windowEnd: today });
+    expect(await getPendingStreakRewards(module.moduleId)).toHaveLength(1);
+    const firstReveal = await revealStreakReward(pending!.rewardDrawId);
+    const repeatedReveal = await revealStreakReward(pending!.rewardDrawId);
+    expect(firstReveal).toMatchObject({
+      resultType: 'gift', prizeTitle: '一杯奶茶', coverPath: '/subpackages/reward-assets/default-cover.png',
+    });
+    expect(repeatedReveal).toEqual(firstReveal);
+    expect(await getPendingStreakReward(module.moduleId)).toBeUndefined();
+    expect(await getReceivedStreakRewards(module.moduleId)).toMatchObject({
+      counts: { all: 1, gift: 1, sticker: 0 },
+      items: [{ rewardDrawId: pending!.rewardDrawId, coverPath: '/subpackages/reward-assets/default-cover.png' }],
+    });
+    expect(readDatabase().streakRewardEvents).toHaveLength(1);
+    expect(readDatabase().streakRewardDraws).toHaveLength(1);
+  });
+
+  it('does not issue a reward retroactively when the seven days were complete before setup', async () => {
+    const module = await createModule({
+      name: '已有连续', description: '', recordPolicy: 'strict', clientRequestId: 'reward_no_backfill_module',
+    });
+    const today = shanghaiDate();
+    const member = (await getModule(module.moduleId)).members[0];
+    updateDatabase((database) => {
+      const currentModule = database.modules.find((item) => item.moduleId === module.moduleId)!;
+      currentModule.members[0].joinedAt = `${addDays(today, -10)}T08:00:00+08:00`;
+      for (let offset = 6; offset >= 0; offset -= 1) {
+        const recordDate = addDays(today, -offset);
+        database.records.push({
+          recordId: `complete_before_rule_${offset}`,
+          moduleId: module.moduleId,
+          memberInstanceId: member.memberInstanceId,
+          userId: member.userId,
+          recordDate,
+          originalPath: STICKER_PATHS[0],
+          stickerPath: STICKER_PATHS[0],
+          remark: '', source: 'normal', status: offset ? 'locked' : 'active',
+          firstEffectiveAt: `${recordDate}T08:00:00+08:00`, updatedAt: `${recordDate}T08:00:00+08:00`,
+        });
+      }
+    });
+    await saveStreakRewardRule(module.moduleId, {
+      targetType: 'member', targetMemberInstanceId: member.memberInstanceId,
+      streakDays: 7,
+      prizeTitle: '周末早餐', prizeDescription: '', winProbability: 80,
+      termsAccepted: true,
+    });
+    expect((await getMyStreakRewardRule(module.moduleId)).rules[0]?.progressDays).toBe(7);
+    expect(await getPendingStreakReward(module.moduleId)).toBeUndefined();
+    expect(readDatabase().streakRewardEvents).toHaveLength(0);
+  });
+
+  it('previews the current reward without consuming the rule or creating a formal draw', async () => {
+    const module = await getModule('module_coffee');
+    const member = module.members.find((item) => item.userId === readDatabase().currentUser.userId)!;
+    await saveStreakRewardRule(module.moduleId, {
+      targetType: 'member',
+      targetMemberInstanceId: member.memberInstanceId,
+      streakDays: 7,
+      prizeTitle: '一杯奶茶',
+      prizeDescription: '周末一起兑换',
+      winProbability: 100,
+      termsAccepted: true,
+    });
+
+    const ruleId = (await getMyStreakRewardRule(module.moduleId)).rules[0]!.rule.rewardRuleId;
+    const preview = await previewStreakReward(module.moduleId, ruleId);
+
+    expect(preview.pending).toMatchObject({ moduleId: module.moduleId, targetType: 'member', streakDays: 7 });
+    expect(preview.revealed).toMatchObject({ resultType: 'gift', prizeTitle: '一杯奶茶' });
+    expect((await getMyStreakRewardRule(module.moduleId)).rules[0]?.rule.status).toBe('active');
+    expect(await getPendingStreakReward(module.moduleId)).toBeUndefined();
+    expect(readDatabase().streakRewardEvents).toHaveLength(0);
+    expect(readDatabase().streakRewardDraws).toHaveLength(0);
+  });
+
+  it('keeps multiple reward rules active with independent targets and day counts', async () => {
+    const module = await getModule('module_coffee');
+    const member = module.members.find((item) => item.userId === readDatabase().currentUser.userId)!;
+    await saveStreakRewardRule(module.moduleId, {
+      targetType: 'member', targetMemberInstanceId: member.memberInstanceId, streakDays: 3,
+      prizeTitle: '一杯咖啡', prizeDescription: '', winProbability: 50, termsAccepted: true,
+    });
+    await saveStreakRewardRule(module.moduleId, {
+      targetType: 'member', targetMemberInstanceId: member.memberInstanceId, streakDays: 12,
+      prizeTitle: '一次电影票', prizeDescription: '', winProbability: 80, termsAccepted: true,
+    });
+
+    const configured = await getMyStreakRewardRule(module.moduleId);
+    expect(configured.rules).toHaveLength(2);
+    expect(configured.rules.map((item) => item.rule.streakDays).sort((left, right) => left - right)).toEqual([3, 12]);
+    expect(configured.rules.every((item) => item.rule.status === 'active')).toBe(true);
+  });
+
+  it('excludes makeup records from an all-member reward streak', async () => {
+    const today = shanghaiDate();
+    const module = await getModule('module_weekend');
+    const currentMember = module.members.find((member) => member.userId === readDatabase().currentUser.userId)!;
+    updateDatabase((database) => {
+      database.records = database.records.filter((record) => record.moduleId !== module.moduleId);
+      const storedModule = database.modules.find((item) => item.moduleId === module.moduleId)!;
+      storedModule.members.forEach((member) => { member.joinedAt = `${addDays(today, -10)}T08:00:00+08:00`; });
+      for (let offset = 6; offset >= 0; offset -= 1) {
+        const recordDate = addDays(today, -offset);
+        storedModule.members.forEach((member, memberIndex) => {
+          if (offset === 0 && member.memberInstanceId === currentMember.memberInstanceId) return;
+          database.records.push({
+            recordId: `group_reward_${offset}_${memberIndex}`,
+            moduleId: module.moduleId,
+            memberInstanceId: member.memberInstanceId,
+            userId: member.userId,
+            recordDate,
+            originalPath: STICKER_PATHS[memberIndex],
+            stickerPath: STICKER_PATHS[memberIndex],
+            remark: '',
+            source: offset === 3 && memberIndex === 1 ? 'makeup' : 'normal',
+            status: offset === 0 ? 'active' : 'locked',
+            firstEffectiveAt: `${recordDate}T08:00:00+08:00`,
+            updatedAt: `${recordDate}T08:00:00+08:00`,
+          });
+        });
+      }
+    });
+    await saveStreakRewardRule(module.moduleId, {
+      targetType: 'all', streakDays: 7, prizeTitle: '一次电影票', prizeDescription: '', winProbability: 100, termsAccepted: true,
+    });
+    await saveRecord({
+      moduleId: module.moduleId, recordDate: today, originalPath: STICKER_PATHS[0],
+      stickerPath: STICKER_PATHS[0], remark: '', clientRequestId: 'group_reward_final_record',
+    });
+    expect(await getPendingStreakReward(module.moduleId)).toBeUndefined();
+    expect(readDatabase().streakRewardEvents).toHaveLength(0);
+  });
+
   it('lets a participant leave while preserving the shared module', async () => {
     await expect(removeModuleForCurrentUser('module_dinner')).resolves.toBe('left');
     await expect(getModule('module_dinner')).rejects.toThrow('MODULE_ACCESS_DENIED');
@@ -298,7 +532,7 @@ describe('Beta relationship contract', () => {
     storage.set('notemylife.alpha.database.v1', legacy);
 
     const migrated = readDatabase();
-    expect(migrated.schemaVersion).toBe(9);
+    expect(migrated.schemaVersion).toBe(10);
     expect(migrated.modules.every((module) => module.recordPolicy === 'strict')).toBe(true);
     expect(migrated.betaDemoSeeded).toBe(true);
     expect(migrated.templates.map((template) => template.name)).toEqual([

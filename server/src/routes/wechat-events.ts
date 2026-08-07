@@ -100,7 +100,7 @@ async function applyMediaCheckDecision(pool: Pool, decision: MediaCheckDecision)
       `UPDATE media_asset
           SET content_check_status = 'passed', failure_code = NULL, failure_message = NULL,
               status = IF(cutout_status = 'succeeded', 'ready', status),
-              ready_at = IF(cutout_status = 'succeeded', UTC_TIMESTAMP(3), ready_at),
+              ready_at = IF(cutout_status = 'succeeded', CURRENT_TIMESTAMP(3), ready_at),
               version = version + 1
         WHERE media_id = ? AND content_check_trace_id = ? AND status = 'processing'
           AND content_check_status NOT IN ('passed', 'rejected')`,

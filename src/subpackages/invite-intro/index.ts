@@ -17,7 +17,13 @@ Page({
       this.setData({ loading: false, resultText: '这个邀请不存在或已经失效。' });
     }
   },
-  goBack() { void wx.navigateBack(); },
+  goBack() {
+    if (getCurrentPages().length > 1) {
+      void wx.navigateBack();
+      return;
+    }
+    void wx.switchTab({ url: '/pages/home/index' });
+  },
   async apply() {
     if (this.data.submitting || !this.data.preview?.valid) return;
     this.setData({ submitting: true });

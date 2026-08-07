@@ -170,7 +170,7 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
               mm.role AS current_role, mm.member_instance_id AS current_member_instance_id,
               (SELECT COUNT(*) FROM module_inbox_item i
                 WHERE i.module_id = m.module_id AND i.recipient_user_id = mm.user_id
-                  AND i.status = 'unread' AND i.expire_at > UTC_TIMESTAMP(3)) AS unread_inbox_count
+                  AND i.status = 'unread' AND i.expire_at > CURRENT_TIMESTAMP(3)) AS unread_inbox_count
          FROM module_member mm
          JOIN life_module m ON m.module_id = mm.module_id
          LEFT JOIN user_module_preference p ON p.user_id = mm.user_id AND p.module_id = mm.module_id
@@ -202,7 +202,7 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
       await connection.execute(
         `INSERT INTO user_module_preference (user_id, module_id, is_pinned)
          VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE is_pinned = VALUES(is_pinned), updated_at = UTC_TIMESTAMP(3)`,
+         ON DUPLICATE KEY UPDATE is_pinned = VALUES(is_pinned), updated_at = CURRENT_TIMESTAMP(3)`,
         [user.userId, moduleId, body.isPinned],
       );
       return { moduleId: publicId('m', moduleId), isPinned: body.isPinned };
@@ -331,7 +331,7 @@ export function moduleRoutes(pool: Pool, wechat: WechatService, storage: Storage
       const [update] = await connection.execute<ResultSetHeader>(
         `UPDATE life_module
             SET status = 'active', deleted_at = NULL, recycle_expire_at = NULL, version = version + 1
-          WHERE module_id = ? AND status = 'pending_delete' AND recycle_expire_at > UTC_TIMESTAMP(3)`,
+          WHERE module_id = ? AND status = 'pending_delete' AND recycle_expire_at > CURRENT_TIMESTAMP(3)`,
         [moduleId],
       );
       if (update.affectedRows !== 1) throw new AppError('MODULE_DELETED', '模块已无法恢复', 410);
@@ -385,7 +385,10 @@ async function loadTodayPreviews(pool: Pool, moduleIds: string[]): Promise<Previ
   const placeholders = moduleIds.map(() => '?').join(',');
   const [rows] = await pool.query<PreviewRow[]>(
     `SELECT r.module_id, r.record_id, r.member_instance_id, r.first_effective_at,
-            ma.sticker_thumbnail_file_key
+            CASE WHEN r.media_variant = 'original'
+              THEN IF(ma.thumbnail_file_key IS NULL OR ma.thumbnail_file_key = ma.sticker_thumbnail_file_key,
+                ma.original_file_key, ma.thumbnail_file_key)
+              ELSE ma.sticker_thumbnail_file_key END AS sticker_thumbnail_file_key
        FROM life_record r
        JOIN module_member mm ON mm.member_instance_id = r.member_instance_id
         AND mm.module_id = r.module_id AND mm.status = 'active'

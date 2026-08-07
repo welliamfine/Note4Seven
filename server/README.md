@@ -19,6 +19,7 @@ npm run verify
 - `AUTO_MIGRATE=false` 是生产强制条件
 - `ALLOW_DEV_AUTH=true` 在生产会直接启动失败
 - 回调、COS 事件、订阅、`/metrics` 和 `/analytics/events` 只在对应 `ENABLE_*` 打开后提供
+- 微信订阅模板需包含 `thing1`（模块名）、`time2`（时间）和 `thing3`（提示）；多人打卡动态与个人定时提醒共用 `SUBSCRIBE_TEMPLATE_ID`
 
 `GET /health` 返回数据库、微信和存储 readiness，并包含 release ID 和环境。业务 API 前缀为 `/api/v1`，机器可读合同位于 `openapi/openapi.json`。
 

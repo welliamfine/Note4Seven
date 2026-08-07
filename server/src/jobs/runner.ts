@@ -9,6 +9,7 @@ import { syncRecordForMedia } from '../services/media-state';
 import { invalidateMonthlyMemoryCards, recalculateDailySnapshot } from '../services/record-projections';
 import type { MetricsRegistry } from '../observability/metrics';
 import { analyticsUserHash } from '../lib/analytics';
+import { checkinNotificationData } from '../services/checkin-notifications';
 
 interface RunnerDependencies {
   pool: Pool;
@@ -41,6 +42,15 @@ interface MediaJobRow extends RowDataPacket {
   content_check_trace_id: string | null;
   processing_attempts: number;
   purpose: string;
+}
+
+interface CheckinNotificationRow extends RowDataPacket {
+  reminder_id: string;
+  open_id: string;
+  module_id: string;
+  module_name: string;
+  record_date: Date | string;
+  display_name_snapshot: string;
 }
 
 type MediaFailureStage = 'cutout' | 'content_check';
@@ -125,19 +135,20 @@ export function startJobRunner(dependencies: RunnerDependencies): JobRunnerContr
 
 async function runCycle(deps: RunnerDependencies): Promise<void> {
   await processMediaEvents(deps);
+  if (deps.config.capabilities.subscriptions) await processCheckinNotificationEvents(deps);
   await processStorageDeleteEvents(deps);
   await processInviteCodeEvents(deps);
   await processMemoryExportEvents(deps);
   await publishPassiveEvents(deps.pool);
 
   const now = new Date();
-  const minuteKey = now.toISOString().slice(0, 16);
+  const shanghaiNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const minuteKey = shanghaiNow.toISOString().slice(0, 16);
   await runScheduled(deps, 'expire_state', minuteKey, () => expireState(deps.pool));
   if (deps.config.capabilities.subscriptions) {
     await runScheduled(deps, 'reminders', minuteKey, () => sendReminders(deps));
   }
 
-  const shanghaiNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
   const hourKey = shanghaiNow.toISOString().slice(0, 13);
   await runScheduled(deps, 'cleanup', hourKey, () => cleanupExpiredRows(deps.pool));
   await runScheduled(deps, 'recycle_purge', hourKey, () => purgeExpiredModules(deps.pool));
@@ -175,7 +186,7 @@ async function runScheduled(
     await work();
     if (leaseLost) throw new Error(`Scheduled job lease was lost: ${jobName}/${runKey}`);
     await deps.pool.execute(
-      `UPDATE scheduled_job_run SET status = 'completed', completed_at = UTC_TIMESTAMP(3),
+      `UPDATE scheduled_job_run SET status = 'completed', completed_at = CURRENT_TIMESTAMP(3),
          locked_by = NULL, lock_expires_at = NULL, last_error = NULL
         WHERE job_name = ? AND run_key = ? AND locked_by = ?`,
       [jobName, runKey, deps.instanceId],
@@ -198,7 +209,7 @@ async function runScheduled(
 async function renewScheduledLease(pool: Pool, jobName: string, runKey: string, instanceId: string): Promise<boolean> {
   const [result] = await pool.execute<ResultSetHeader>(
     `UPDATE scheduled_job_run
-        SET lock_expires_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE)
+        SET lock_expires_at = DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 10 MINUTE)
       WHERE job_name = ? AND run_key = ? AND status = 'running' AND locked_by = ?`,
     [jobName, runKey, instanceId],
   );
@@ -210,7 +221,7 @@ async function claimScheduled(pool: Pool, jobName: string, runKey: string, insta
     const [insert] = await connection.execute<ResultSetHeader>(
       `INSERT IGNORE INTO scheduled_job_run
          (job_name, run_key, status, locked_by, lock_expires_at, attempt_count, started_at)
-       VALUES (?, ?, 'running', ?, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE), 1, UTC_TIMESTAMP(3))`,
+       VALUES (?, ?, 'running', ?, DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 10 MINUTE), 1, CURRENT_TIMESTAMP(3))`,
       [jobName, runKey, instanceId],
     );
     if (insert.affectedRows === 1) return true;
@@ -218,11 +229,11 @@ async function claimScheduled(pool: Pool, jobName: string, runKey: string, insta
     const [update] = await connection.execute<ResultSetHeader>(
       `UPDATE scheduled_job_run
           SET status = 'running', locked_by = ?,
-              lock_expires_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 10 MINUTE),
-              attempt_count = attempt_count + 1, started_at = UTC_TIMESTAMP(3),
+              lock_expires_at = DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL 10 MINUTE),
+              attempt_count = attempt_count + 1, started_at = CURRENT_TIMESTAMP(3),
               completed_at = NULL, last_error = NULL
         WHERE job_name = ? AND run_key = ?
-          AND (status = 'failed' OR (status = 'running' AND lock_expires_at < UTC_TIMESTAMP(3)))`,
+          AND (status = 'failed' OR (status = 'running' AND lock_expires_at < CURRENT_TIMESTAMP(3)))`,
       [instanceId, jobName, runKey],
     );
     return update.affectedRows === 1;
@@ -287,7 +298,7 @@ async function processOneMedia(deps: RunnerDependencies, mediaId: string): Promi
     await deps.pool.execute(
       `UPDATE media_asset SET thumbnail_file_key = ?, sticker_file_key = ?, sticker_thumbnail_file_key = ?,
          cutout_status = 'succeeded', content_check_status = 'passed', status = 'ready',
-         failure_code = NULL, failure_message = NULL, ready_at = UTC_TIMESTAMP(3)
+         failure_code = NULL, failure_message = NULL, ready_at = CURRENT_TIMESTAMP(3)
       WHERE media_id = ?`,
       [keys.original, keys.original, keys.original, mediaId],
     );
@@ -359,7 +370,7 @@ async function processOneMedia(deps: RunnerDependencies, mediaId: string): Promi
               WHEN content_check_status = 'passed' AND cutout_status = 'succeeded' THEN 'ready'
               ELSE 'processing'
             END,
-            ready_at = IF(content_check_status = 'passed' AND cutout_status = 'succeeded', UTC_TIMESTAMP(3), ready_at),
+            ready_at = IF(content_check_status = 'passed' AND cutout_status = 'succeeded', CURRENT_TIMESTAMP(3), ready_at),
             version = version + 1
       WHERE media_id = ? AND status <> 'abandoned'`,
     [mediaId],
@@ -417,14 +428,17 @@ async function processMemoryExportEvents(deps: RunnerDependencies): Promise<void
       );
       if (!rows[0]) throw new Error('memory card not found');
       const [items] = await deps.pool.execute<RowDataPacket[]>(
-        `SELECT ma.sticker_file_key, ma.sticker_thumbnail_file_key
+        `SELECT CASE WHEN r.media_variant = 'original'
+                  THEN IF(ma.thumbnail_file_key IS NULL OR ma.thumbnail_file_key = ma.sticker_thumbnail_file_key,
+                    ma.original_file_key, ma.thumbnail_file_key)
+                  ELSE ma.sticker_file_key END AS display_file_key
            FROM monthly_memory_card_item mci
            JOIN life_record r ON r.record_id = mci.record_id
            JOIN media_asset ma ON ma.media_id = r.media_id
           WHERE mci.memory_card_id = ? ORDER BY mci.display_order LIMIT 8`,
         [event.aggregate_id],
       );
-      const sourceKeys = items.map((item) => String(item.sticker_file_key ?? item.sticker_thumbnail_file_key)).filter(Boolean);
+      const sourceKeys = items.map((item) => String(item.display_file_key)).filter(Boolean);
       const objectKey = `memory-cards/${event.aggregate_id}/v${Date.now()}.webp`;
       await deps.storage.createMemoryCardExport({
         objectKey,
@@ -445,13 +459,77 @@ async function processMemoryExportEvents(deps: RunnerDependencies): Promise<void
   }
 }
 
+async function processCheckinNotificationEvents(deps: RunnerDependencies): Promise<void> {
+  const events = await claimOutbox(deps.pool, 'checkin.notification_requested', 20);
+  for (const event of events) {
+    const payload = parsePayload(event.payload);
+    const subscriptionId = String(payload.subscriptionId ?? '');
+    const recipientUserId = String(payload.recipientUserId ?? '');
+    try {
+      const [rows] = await deps.pool.execute<CheckinNotificationRow[]>(
+        `SELECT rs.reminder_id, u.open_id, m.module_id, m.name AS module_name,
+                r.record_date, r.display_name_snapshot
+           FROM life_record r
+           JOIN life_module m ON m.module_id = r.module_id
+           JOIN reminder_subscription rs ON rs.reminder_id = ? AND rs.module_id = r.module_id
+           JOIN module_member mm ON mm.member_instance_id = rs.member_instance_id
+           JOIN user_account u ON u.user_id = rs.user_id
+          WHERE r.record_id = ? AND rs.user_id = ?
+            AND r.status IN ('active', 'locked') AND m.status = 'active' AND m.mode = 'group'
+            AND mm.status = 'active'
+          LIMIT 1`,
+        [subscriptionId, event.aggregate_id, recipientUserId],
+      );
+      const row = rows[0];
+      if (!row) {
+        await publishEvent(deps.pool, event.event_id);
+        continue;
+      }
+      const shanghaiNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+      await deps.wechat.sendSubscriptionMessage({
+        touser: row.open_id,
+        template_id: deps.config.subscribeTemplateId,
+        page: `subpackages/module-detail/index?moduleId=${publicModuleId(row.module_id)}&date=${sqlDate(row.record_date)}`,
+        miniprogram_state: subscriptionMessageState(deps.config.miniProgramCodeEnvVersion),
+        lang: 'zh_CN',
+        data: checkinNotificationData(
+          row.display_name_snapshot,
+          row.module_name,
+          shanghaiNow.toISOString().slice(11, 16),
+          deps.config.subscribeFields,
+        ),
+      });
+      await deps.pool.execute(
+        `UPDATE reminder_subscription
+            SET checkin_notify_last_sent_at = CURRENT_TIMESTAMP(3),
+                checkin_notify_last_send_status = 'sent',
+                checkin_notify_last_failure_reason = NULL
+          WHERE reminder_id = ?`,
+        [subscriptionId],
+      );
+      await publishEvent(deps.pool, event.event_id);
+      deps.metrics?.increment('checkin_notification_total', { result: 'sent' });
+    } catch (error) {
+      const retryDelay = await retryEvent(deps.pool, event, error);
+      await deps.pool.execute(
+        `UPDATE reminder_subscription
+            SET checkin_notify_last_send_status = ?, checkin_notify_last_failure_reason = ?
+          WHERE reminder_id = ?`,
+        [retryDelay > 0 ? 'retrying' : 'failed', safeError(error).slice(0, 64), subscriptionId],
+      );
+      deps.logger.error({ err: error, recordId: event.aggregate_id }, 'check-in notification failed');
+      deps.metrics?.increment('checkin_notification_total', { result: 'failed' });
+    }
+  }
+}
+
 async function publishPassiveEvents(pool: Pool): Promise<void> {
   await pool.execute(
-    `UPDATE outbox_event SET status = 'audited', published_at = UTC_TIMESTAMP(3)
+    `UPDATE outbox_event SET status = 'audited', published_at = CURRENT_TIMESTAMP(3)
       WHERE status IN ('pending', 'failed')
         AND event_type NOT IN ('media.processing_requested', 'storage.delete_requested',
-          'invite.code_requested', 'memory.export_requested')
-        AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP(3))
+          'invite.code_requested', 'memory.export_requested', 'checkin.notification_requested')
+        AND (next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP(3))
       ORDER BY event_id LIMIT 100`,
   );
 }
@@ -464,7 +542,7 @@ async function claimOutbox(pool: Pool, eventType: string, limit: number): Promis
       `SELECT event_id, aggregate_id, event_type, payload, retry_count, created_at
          FROM outbox_event
         WHERE event_type = ? AND status IN ('pending', 'failed')
-          AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP(3))
+          AND (next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP(3))
         ORDER BY event_id LIMIT ? FOR UPDATE`,
       [eventType, limit],
     );
@@ -479,7 +557,7 @@ async function claimOutbox(pool: Pool, eventType: string, limit: number): Promis
 
 async function publishEvent(pool: Pool, eventId: string): Promise<void> {
   await pool.execute(
-    `UPDATE outbox_event SET status = 'published', published_at = UTC_TIMESTAMP(3), next_retry_at = NULL WHERE event_id = ?`,
+    `UPDATE outbox_event SET status = 'published', published_at = CURRENT_TIMESTAMP(3), next_retry_at = NULL WHERE event_id = ?`,
     [eventId],
   );
 }
@@ -492,7 +570,7 @@ async function retryEvent(pool: Pool, event: OutboxRow, error: unknown): Promise
     : Math.min(3600, 15 * 2 ** Math.min(retry, 8));
   await pool.execute(
     `UPDATE outbox_event SET status = ?, retry_count = ?,
-       next_retry_at = IF(? = 1, NULL, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL ? SECOND)),
+       next_retry_at = IF(? = 1, NULL, DATE_ADD(CURRENT_TIMESTAMP(3), INTERVAL ? SECOND)),
        payload = JSON_SET(payload, '$.lastError', ?)
      WHERE event_id = ?`,
     [deadLetter ? 'dead_letter' : 'failed', retry, deadLetter ? 1 : 0, retryDelay, safeError(error), event.event_id],
@@ -529,7 +607,7 @@ async function collectQueueMetrics(deps: RunnerDependencies): Promise<void> {
   if (!deps.metrics) return;
   const [rows] = await deps.pool.query<RowDataPacket[]>(
     `SELECT event_type, status, COUNT(*) AS total,
-            COALESCE(TIMESTAMPDIFF(SECOND, MIN(created_at), UTC_TIMESTAMP(3)), 0) AS oldest_seconds
+            COALESCE(TIMESTAMPDIFF(SECOND, MIN(created_at), CURRENT_TIMESTAMP(3)), 0) AS oldest_seconds
        FROM outbox_event
       WHERE status IN ('pending', 'failed', 'publishing')
       GROUP BY event_type, status`,
@@ -543,26 +621,26 @@ async function collectQueueMetrics(deps: RunnerDependencies): Promise<void> {
 
 async function expireState(pool: Pool): Promise<void> {
   await inTransaction(pool, async (connection) => {
-    await connection.execute(`UPDATE invite_token SET status = 'expired' WHERE status = 'active' AND expire_at <= UTC_TIMESTAMP(3)`);
+    await connection.execute(`UPDATE invite_token SET status = 'expired' WHERE status = 'active' AND expire_at <= CURRENT_TIMESTAMP(3)`);
     await connection.execute(
       `UPDATE life_record r JOIN makeup_approval a ON a.record_id = r.record_id
           SET r.status = 'expired', r.version = r.version + 1
-        WHERE a.status = 'pending' AND a.expire_at <= UTC_TIMESTAMP(3) AND r.status = 'pending'`,
+        WHERE a.status = 'pending' AND a.expire_at <= CURRENT_TIMESTAMP(3) AND r.status = 'pending'`,
     );
     await connection.execute(
       `UPDATE makeup_approval SET status = 'expired', resolution_reason = 'timeout', version = version + 1
-        WHERE status = 'pending' AND expire_at <= UTC_TIMESTAMP(3)`,
+        WHERE status = 'pending' AND expire_at <= CURRENT_TIMESTAMP(3)`,
     );
     await connection.execute(
       `UPDATE join_application SET status = 'expired', resolution_reason = 'timeout', version = version + 1
-        WHERE status = 'pending' AND expire_at <= UTC_TIMESTAMP(3)`,
+        WHERE status = 'pending' AND expire_at <= CURRENT_TIMESTAMP(3)`,
     );
     await connection.execute(
-      `UPDATE module_inbox_item SET status = 'expired' WHERE status IN ('unread', 'read') AND expire_at <= UTC_TIMESTAMP(3)`,
+      `UPDATE module_inbox_item SET status = 'expired' WHERE status IN ('unread', 'read') AND expire_at <= CURRENT_TIMESTAMP(3)`,
     );
     await connection.execute(
       `UPDATE notification SET action_status = 'expired'
-        WHERE action_status = 'actionable' AND expired_at <= UTC_TIMESTAMP(3)`,
+        WHERE action_status = 'actionable' AND expired_at <= CURRENT_TIMESTAMP(3)`,
     );
   });
 }
@@ -592,8 +670,8 @@ async function sendReminders(deps: RunnerDependencies): Promise<void> {
       await deps.wechat.sendSubscriptionMessage({
         touser: row.open_id,
         template_id: deps.config.subscribeTemplateId,
-        page: `/pages/module-detail/index?moduleId=${publicModuleId(row.module_id)}`,
-        miniprogram_state: 'formal',
+        page: `subpackages/module-detail/index?moduleId=${publicModuleId(row.module_id)}`,
+        miniprogram_state: subscriptionMessageState(deps.config.miniProgramCodeEnvVersion),
         lang: 'zh_CN',
         data: {
           [deps.config.subscribeFields.thing]: { value: String(row.module_name).slice(0, 20) },
@@ -602,7 +680,9 @@ async function sendReminders(deps: RunnerDependencies): Promise<void> {
         },
       });
       await deps.pool.execute(
-        `UPDATE reminder_subscription SET last_sent_date = ?, last_send_status = 'sent', last_failure_reason = NULL
+        `UPDATE reminder_subscription
+            SET last_sent_date = ?, last_send_status = 'sent', last_failure_reason = NULL,
+                subscription_status = 'exhausted', enabled = 0
           WHERE reminder_id = ? AND (last_sent_date IS NULL OR last_sent_date <> ?)`,
         [today, row.reminder_id, today],
       );
@@ -628,15 +708,15 @@ async function createDailySnapshots(pool: Pool, recordDate: string): Promise<voi
 }
 
 async function cleanupExpiredRows(pool: Pool): Promise<void> {
-  await pool.execute(`DELETE FROM auth_session WHERE expires_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 DAY) OR revoked_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 7 DAY)`);
-  await pool.execute(`DELETE FROM idempotency_request WHERE expire_at < UTC_TIMESTAMP(3)`);
-  await pool.execute(`DELETE FROM outbox_event WHERE status IN ('published', 'audited') AND published_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 30 DAY)`);
-  await pool.execute(`DELETE FROM scheduled_job_run WHERE status = 'completed' AND completed_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 30 DAY)`);
-  await pool.execute(`DELETE FROM analytics_event WHERE received_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 90 DAY)`);
+  await pool.execute(`DELETE FROM auth_session WHERE expires_at < DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL 1 DAY) OR revoked_at < DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL 7 DAY)`);
+  await pool.execute(`DELETE FROM idempotency_request WHERE expire_at < CURRENT_TIMESTAMP(3)`);
+  await pool.execute(`DELETE FROM outbox_event WHERE status IN ('published', 'audited') AND published_at < DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL 30 DAY)`);
+  await pool.execute(`DELETE FROM scheduled_job_run WHERE status = 'completed' AND completed_at < DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL 30 DAY)`);
+  await pool.execute(`DELETE FROM analytics_event WHERE received_at < DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL 90 DAY)`);
   const [orphans] = await pool.execute<RowDataPacket[]>(
     `SELECT media_id, original_file_key, thumbnail_file_key, sticker_file_key, sticker_thumbnail_file_key
        FROM media_asset ma
-      WHERE ma.updated_at < DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 24 HOUR)
+      WHERE ma.updated_at < DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL 24 HOUR)
         AND ma.status IN ('created', 'uploading', 'uploaded', 'failed', 'abandoned')
         AND NOT EXISTS (SELECT 1 FROM life_record r WHERE r.media_id = ma.media_id)
       LIMIT 100`,
@@ -657,7 +737,7 @@ async function cleanupExpiredRows(pool: Pool): Promise<void> {
 async function purgeExpiredModules(pool: Pool): Promise<void> {
   const [modules] = await pool.execute<RowDataPacket[]>(
     `SELECT module_id FROM life_module
-      WHERE status = 'pending_delete' AND recycle_expire_at <= UTC_TIMESTAMP(3) LIMIT 10`,
+      WHERE status = 'pending_delete' AND recycle_expire_at <= CURRENT_TIMESTAMP(3) LIMIT 10`,
   );
   for (const module of modules) await purgeModule(pool, String(module.module_id));
 }
@@ -680,6 +760,9 @@ async function purgeModule(pool: Pool, moduleId: string): Promise<void> {
     await connection.execute(`DELETE aa FROM approval_action aa JOIN makeup_approval ma ON ma.approval_id = aa.approval_id WHERE ma.module_id = ?`, [moduleId]);
     await connection.execute('DELETE FROM module_inbox_item WHERE module_id = ?', [moduleId]);
     await connection.execute('DELETE FROM notification WHERE module_id = ?', [moduleId]);
+    await connection.execute('DELETE FROM streak_reward_draw WHERE module_id = ?', [moduleId]);
+    await connection.execute('DELETE FROM streak_reward_event WHERE module_id = ?', [moduleId]);
+    await connection.execute('DELETE FROM streak_reward_rule WHERE module_id = ?', [moduleId]);
     await connection.execute('DELETE FROM reaction WHERE module_id = ?', [moduleId]);
     await connection.execute('DELETE FROM makeup_approval WHERE module_id = ?', [moduleId]);
     await connection.execute(`DELETE rr FROM record_revision rr JOIN life_record r ON r.record_id = rr.record_id WHERE r.module_id = ?`, [moduleId]);
@@ -694,13 +777,13 @@ async function purgeModule(pool: Pool, moduleId: string): Promise<void> {
     await connection.execute('DELETE FROM reminder_subscription WHERE module_id = ?', [moduleId]);
     await connection.execute('DELETE FROM user_module_preference WHERE module_id = ?', [moduleId]);
     await connection.execute(
-      `UPDATE module_member SET status = IF(status = 'active', 'removed', status), left_at = COALESCE(left_at, UTC_TIMESTAMP(3)),
+      `UPDATE module_member SET status = IF(status = 'active', 'removed', status), left_at = COALESCE(left_at, CURRENT_TIMESTAMP(3)),
          leave_reason = COALESCE(leave_reason, 'module_deleted'), nickname_snapshot = '已删除成员', avatar_file_key_snapshot = NULL
        WHERE module_id = ?`,
       [moduleId],
     );
     await connection.execute(
-      `UPDATE life_module SET status = 'deleted', active_member_count = 0, deleted_at = COALESCE(deleted_at, UTC_TIMESTAMP(3)),
+      `UPDATE life_module SET status = 'deleted', active_member_count = 0, deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP(3)),
          version = version + 1 WHERE module_id = ?`,
       [moduleId],
     );
@@ -711,7 +794,7 @@ async function finalizeAccountDeletions(deps: RunnerDependencies): Promise<void>
   const { pool } = deps;
   const [users] = await pool.execute<RowDataPacket[]>(
     `SELECT deletion_request_id, user_id FROM account_deletion_request
-      WHERE (status = 'cooling_off' AND execute_after <= UTC_TIMESTAMP(3)) OR status = 'processing'
+      WHERE (status = 'cooling_off' AND execute_after <= CURRENT_TIMESTAMP(3)) OR status = 'processing'
       ORDER BY deletion_request_id LIMIT 10`,
   );
   for (const item of users) {
@@ -721,7 +804,7 @@ async function finalizeAccountDeletions(deps: RunnerDependencies): Promise<void>
           WHERE deletion_request_id = ? AND status IN ('cooling_off', 'processing')`,
         [item.deletion_request_id],
       );
-      await connection.execute('UPDATE auth_session SET revoked_at = UTC_TIMESTAMP(3) WHERE user_id = ? AND revoked_at IS NULL', [item.user_id]);
+      await connection.execute('UPDATE auth_session SET revoked_at = CURRENT_TIMESTAMP(3) WHERE user_id = ? AND revoked_at IS NULL', [item.user_id]);
       const [members] = await connection.execute<RowDataPacket[]>(
         `SELECT member_instance_id, module_id FROM module_member
           WHERE user_id = ? AND status = 'active' AND role = 'member' FOR UPDATE`,
@@ -729,7 +812,7 @@ async function finalizeAccountDeletions(deps: RunnerDependencies): Promise<void>
       );
       for (const member of members) {
         await connection.execute(
-          `UPDATE module_member SET status = 'exited', left_at = UTC_TIMESTAMP(3), leave_reason = 'account_deleted',
+          `UPDATE module_member SET status = 'exited', left_at = CURRENT_TIMESTAMP(3), leave_reason = 'account_deleted',
              nickname_snapshot = '已注销用户', avatar_file_key_snapshot = NULL
            WHERE member_instance_id = ?`,
           [member.member_instance_id],
@@ -858,7 +941,7 @@ async function eraseUserData(pool: Pool, userId: string, deletionRequestId: stri
     }
     await connection.execute(
       `UPDATE module_member SET status = IF(status = 'active', 'exited', status),
-         left_at = COALESCE(left_at, UTC_TIMESTAMP(3)), leave_reason = COALESCE(leave_reason, 'account_deleted'),
+         left_at = COALESCE(left_at, CURRENT_TIMESTAMP(3)), leave_reason = COALESCE(leave_reason, 'account_deleted'),
          nickname_snapshot = '已注销用户', avatar_file_key_snapshot = NULL, version = version + 1
        WHERE user_id = ?`,
       [userId],
@@ -879,7 +962,7 @@ async function eraseUserData(pool: Pool, userId: string, deletionRequestId: stri
       [userId],
     );
     await connection.execute(
-      `UPDATE account_deletion_request SET status = 'completed', completed_at = UTC_TIMESTAMP(3)
+      `UPDATE account_deletion_request SET status = 'completed', completed_at = CURRENT_TIMESTAMP(3)
        WHERE deletion_request_id = ? AND status = 'processing'`,
       [deletionRequestId],
     );
@@ -898,4 +981,14 @@ function safeError(error: unknown): string {
 
 function publicModuleId(value: unknown): string {
   return `m_${String(value)}`;
+}
+
+function sqlDate(value: Date | string): string {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+}
+
+function subscriptionMessageState(
+  version: AppConfig['miniProgramCodeEnvVersion'],
+): 'developer' | 'trial' | 'formal' {
+  return version === 'release' ? 'formal' : version === 'trial' ? 'trial' : 'developer';
 }

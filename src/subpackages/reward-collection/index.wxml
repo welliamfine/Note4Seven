@@ -1,0 +1,28 @@
+<view class="reward-collection-page">
+  <view class="collection-nav" style="padding-top:{{statusBarHeight}}px">
+    <view class="collection-back" bindtap="goBack" role="button" aria-label="返回"><image src="/assets/ui/icons/chevron-left.svg" /></view>
+    <text>收到的礼物</text>
+    <text class="collection-count">{{counts.all}}份</text>
+  </view>
+
+  <view class="collection-filters">
+    <view class="{{filter === 'all' ? 'active' : ''}}" data-filter="all" bindtap="chooseFilter">全部 {{counts.all}}</view>
+    <view class="{{filter === 'gift' ? 'active' : ''}}" data-filter="gift" bindtap="chooseFilter">真实礼物 {{counts.gift}}</view>
+    <view class="{{filter === 'sticker' ? 'active' : ''}}" data-filter="sticker" bindtap="chooseFilter">纪念贴 {{counts.sticker}}</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="collection-empty">正在整理你的彩蛋...</view>
+  <view wx:elif="{{!visibleItems.length}}" class="collection-empty"><view class="collection-empty-icon"><image src="/subpackages/assets/ui/custom-icons/reward-empty.png" mode="scaleToFill" /></view><text>这里还没有礼物</text></view>
+  <view wx:else class="collection-grid">
+    <view wx:for="{{visibleItems}}" wx:key="rewardDrawId" class="collection-card collection-card-{{item.resultType}}">
+      <image class="collection-texture" src="/subpackages/reward-assets/card-texture.webp" mode="aspectFill" />
+      <view class="collection-code"><text>•••</text><text>{{item.streakDays}} DAY</text><text>•••</text></view>
+      <text class="collection-kicker">{{item.resultType === 'gift' ? '惊喜礼物' : item.streakDays + '日纪念贴'}}</text>
+      <image class="collection-image sticker-outline-medium" src="{{item.resultType === 'gift' ? (item.coverPath || '/subpackages/reward-assets/default-cover.png') : (item.stickerPath || '/subpackages/reward-assets/default-cover.png')}}" mode="aspectFit" webp />
+      <text class="collection-title">{{item.prizeTitle}}</text>
+      <text class="collection-description">{{item.stickerRemark || item.prizeDescription}}</text>
+      <text class="collection-date">{{item.dateRange}}</text>
+    </view>
+  </view>
+</view>
+<privacy-dialog />

@@ -67,8 +67,8 @@
 }
 
 .profile-edit-icon {
-  width: 28rpx;
-  height: 28rpx;
+  width: 34rpx;
+  height: 34rpx;
   margin-left: auto;
   opacity: .48;
 }
@@ -178,9 +178,9 @@
   padding: 0 112rpx 0 26rpx;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: 38rpx 1fr;
+  grid-template-columns: 56rpx 1fr;
   align-items: center;
-  gap: 14rpx;
+  gap: 18rpx;
   border-bottom: 2rpx solid rgba(121,108,96,.08);
   border-radius: 0;
   background: transparent;
@@ -191,18 +191,37 @@
   text-align: left;
 }
 
-.profile-menu button > image:first-child {
-  width: 35rpx;
-  height: 35rpx;
-  opacity: .7;
+.profile-state-icon {
+  position: relative;
+  width: 56rpx;
+  height: 56rpx;
+  overflow: hidden;
+}
+
+.profile-state-icon-sprite {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 200%;
+  max-width: none;
+  height: 100%;
+}
+
+.profile-menu button.profile-menu-selected {
+  background: rgba(245, 222, 219, .52);
+}
+
+.profile-menu-selected .profile-state-icon-sprite {
+  transform: translateX(-50%);
 }
 
 .profile-menu .arrow {
   position: absolute;
   top: 50%;
   right: 26rpx;
-  width: 24rpx;
-  height: 24rpx;
+  width: 28rpx;
+  height: 28rpx;
   transform: translateY(-50%);
   opacity: .55;
 }

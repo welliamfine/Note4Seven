@@ -18,6 +18,8 @@
         "notifications/index",
         "module-todo/index",
         "module-gallery/index",
+        "memory-collage-editor/index",
+        "reward-collection/index",
         "recycle-bin/index",
         "privacy/index"
       ]

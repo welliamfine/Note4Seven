@@ -126,9 +126,8 @@ page {
 }
 
 .sticker-leaving {
-  opacity: 1;
-  transform: scale(var(--sticker-final-scale));
-  animation: sticker-vanish var(--sticker-fade-duration) linear forwards;
+  transform-origin: center center;
+  animation: sticker-point-pop var(--sticker-fade-duration) cubic-bezier(.55,0,1,.45) reverse both;
 }
 
 .sticker-hidden {
@@ -150,9 +149,97 @@ page {
   animation: none;
 }
 
-@keyframes sticker-vanish {
-  from { opacity: 1; }
-  to { opacity: 0; }
+.memory-text-hidden {
+  opacity: 0;
+  transform: translateY(65%) rotateX(-82deg);
+}
+
+.memory-text-visible {
+  opacity: 1;
+  transform: translateY(0) rotateX(0);
+}
+
+.memory-text-exit-up {
+  transform-origin: center center;
+  backface-visibility: hidden;
+  animation: memory-text-out-up 180ms ease-in forwards;
+}
+
+.memory-text-enter-up {
+  transform-origin: center center;
+  backface-visibility: hidden;
+  animation: memory-text-in-up 240ms cubic-bezier(.22,1,.36,1) both;
+}
+
+.memory-surface-hidden {
+  opacity: 0;
+  transform: scale(var(--sticker-initial-scale));
+}
+
+.memory-surface-visible {
+  opacity: 1;
+  transform: scale(var(--sticker-final-scale));
+}
+
+.memory-surface-entering {
+  transform-origin: center center;
+  will-change: transform, opacity;
+  animation: sticker-point-pop var(--sticker-pop-duration) cubic-bezier(.22,1,.36,1) both;
+}
+
+.memory-surface-leaving {
+  transform-origin: center center;
+  will-change: transform, opacity;
+  animation: sticker-point-pop var(--sticker-fade-duration) cubic-bezier(.55,0,1,.45) reverse both;
+}
+
+.change-button {
+  transform-origin: center center;
+  transition:
+    flex-basis 220ms cubic-bezier(.22,1,.36,1),
+    width 220ms cubic-bezier(.22,1,.36,1),
+    min-width 220ms cubic-bezier(.22,1,.36,1),
+    max-width 220ms cubic-bezier(.22,1,.36,1),
+    margin-left 220ms cubic-bezier(.22,1,.36,1);
+}
+
+.change-button.action-leaving {
+  pointer-events: none;
+  animation: sticker-point-pop var(--sticker-fade-duration) cubic-bezier(.55,0,1,.45) reverse both;
+}
+
+.change-button.action-collapsing,
+.change-button.action-hidden {
+  width: 0 !important;
+  min-width: 0;
+  max-width: 0;
+  flex-basis: 0;
+  margin-left: 0;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(var(--sticker-initial-scale));
+}
+
+.change-button.action-expanding {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(var(--sticker-initial-scale));
+}
+
+.change-button.action-entering {
+  pointer-events: none;
+  animation: sticker-point-pop var(--sticker-pop-duration) cubic-bezier(.22,1,.36,1) both;
+}
+
+@keyframes memory-text-out-up {
+  to { opacity: 0; transform: translateY(-65%) rotateX(82deg); }
+}
+
+@keyframes memory-text-in-up {
+  from { opacity: 0; transform: translateY(65%) rotateX(-82deg); }
+  to { opacity: 1; transform: translateY(0) rotateX(0); }
 }
 
 button {

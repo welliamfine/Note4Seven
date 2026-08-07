@@ -20,10 +20,20 @@
   box-shadow: 0 14rpx 30rpx rgba(79,66,53,.08);
 }
 
-.discover-icon image {
-  width: 46rpx;
-  height: 46rpx;
-  opacity: .68;
+.discover-icon-clip {
+  position: relative;
+  width: 58rpx;
+  height: 58rpx;
+  overflow: hidden;
+}
+
+.discover-icon-sprite {
+  position: absolute;
+  top: -58rpx;
+  left: -116rpx;
+  width: 232rpx;
+  max-width: none;
+  height: 116rpx;
 }
 
 .discover-title {

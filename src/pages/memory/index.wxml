@@ -1,33 +1,152 @@
 <view class="page-shell memory-page">
   <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
-  <view class="page-title content-layer">回忆</view>
-  <view class="memory-content content-layer">
-    <view class="weekly-card">
-      <text class="card-kicker">本周概览</text>
-      <view class="weekly-grid">
-        <view><text class="metric-value">{{recordedDays}}</text><text class="metric-label">记录天数</text></view>
-        <view><text class="metric-value">{{moduleCount}}</text><text class="metric-label">参与模块</text></view>
-        <view><text class="metric-value">{{weeklyJointCompleted}}</text><text class="metric-label">共同完成</text></view>
-        <view><text class="metric-value">{{streakDays}}</text><text class="metric-label">连续天数</text></view>
-        <view><text class="metric-value">{{weeklyReceivedReactions}}</text><text class="metric-label">收到回应</text></view>
-        <view><text class="metric-value">{{recordCount}}</text><text class="metric-label">本周记录</text></view>
+  <view class="memory-fixed-header content-layer" style="padding-top: {{statusBarHeight}}px;">
+    <view class="memory-header">
+      <text class="page-title">回忆</text>
+      <view class="report-segment" role="tablist">
+        <view class="report-segment-thumb {{reportTabMode === 'month' ? 'is-month' : ''}}" aria-hidden="true"></view>
+        <view class="report-tab {{reportTabMode === 'week' ? 'selected' : ''}}" data-mode="week" bindtap="setReportMode" role="tab" aria-selected="{{reportTabMode === 'week'}}">周报</view>
+        <view class="report-tab {{reportTabMode === 'month' ? 'selected' : ''}}" data-mode="month" bindtap="setReportMode" role="tab" aria-selected="{{reportTabMode === 'month'}}">月报</view>
       </view>
     </view>
 
-    <view class="record-card">
-      <view class="record-heading">
-        <view bindtap="openSelection"><text class="record-word">RECORD</text><text class="record-month">{{moduleName || '本月记录'}} · {{monthLabel}}</text></view>
-        <button bindtap="changeGroup" disabled="{{changingGroup}}" loading="{{changingGroup}}">{{changingGroup ? '' : '换一组'}}</button>
+  </view>
+  <scroll-view class="memory-scroll content-layer" style="margin-top: calc({{statusBarHeight}}px + 142rpx); height: calc(100vh - {{statusBarHeight}}px - 142rpx);" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="memory-content">
+      <view wx:if="{{loading && !summaryTitle}}" class="memory-loading memory-glass">
+        <view class="loading-line loading-line-wide"></view>
+        <view class="loading-line"></view>
+        <view class="loading-line loading-line-short"></view>
       </view>
-      <view class="memory-grid">
-        <view class="memory-cell" wx:for="{{stickers}}" wx:key="id"><view class="sticker-pop-wrapper {{stickerPhase}}" style="animation-delay: {{stickerPhase === 'sticker-entering' ? item.popDelay : 0}}ms;"><image class="sticker-outline-medium" src="{{item.path}}" mode="aspectFit" webp /></view></view>
-        <view wx:if="{{!stickers.length}}" class="memory-empty">这个月还没有贴纸</view>
+
+      <view wx:elif="{{errorMessage && !summaryTitle}}" class="memory-error memory-glass">
+        <text>{{errorMessage}}</text>
+        <button bindtap="retryLoad">重新加载</button>
       </view>
-      <text class="record-summary">共同完成 {{jointCompleted}} 天　·　收到回应 {{receivedReactions}} 次　·　最常 {{mostUsedEmoji}}</text>
-      <button class="save-button" loading="{{exporting}}" bindtap="saveCard">保存到相册</button>
-      <canvas canvas-id="memoryExportCanvas" class="export-canvas"></canvas>
+
+      <block wx:else>
+        <view class="summary-card memory-glass">
+          <view class="summary-copy">
+            <text class="summary-meta {{summaryMetaMotionClass}}">{{periodLabel}} · {{statusLabel}}</text>
+            <view class="summary-title"><text>这一</text><text class="summary-title-changing {{summaryPeriodMotionClass}}">{{reportMode === 'month' ? '月' : '周'}}</text><text>，你生产了</text><text class="summary-title-changing summary-count {{summaryCountMotionClass}}">{{momentCount}}</text><text>张贴纸！</text></view>
+            <view class="summary-action {{summaryActionMotionClass}}" bindtap="showFullReport" role="button">{{reportActionLabel}}　›</view>
+          </view>
+          <view class="summary-sticker">
+            <view class="sticker-pop-wrapper {{summaryStickerPhase}}">
+              <image class="summary-sticker-image sticker-outline-medium" src="{{latestStickerPath || '/assets/ui/memory-default-sticker.png'}}" mode="aspectFit" webp />
+            </view>
+          </view>
+        </view>
+
+        <view wx:if="{{hasData}}" class="core-metrics">
+          <view class="metric-bubble memory-glass" wx:for="{{metrics}}" wx:key="label">
+            <view class="metric-number-row"><text class="metric-number {{metricValueMotionClasses[index]}}">{{item.value}}</text><text class="metric-unit">{{item.unit}}</text></view>
+            <text class="metric-name">{{item.label}}</text>
+          </view>
+        </view>
+        <view wx:else class="memory-milestone memory-glass">
+          <text class="milestone-kicker">第一枚回忆</text>
+          <text class="milestone-copy">下一次打卡完成后，会在这里留下阶段足迹</text>
+        </view>
+
+        <view class="memory-section collage-section">
+          <view class="section-heading">
+            <text class="section-title">回忆拼贴</text>
+            <view class="section-actions {{collageActionPhase}}">
+              <view class="scope-chip selected" bindtap="openSelection" role="button"><text class="scope-label">{{scopeLabel}}</text><image class="scope-chevron" src="/assets/ui/icons/chevron-down.svg" /></view>
+              <view class="change-button {{collageActionPhase}} {{changingGroup || !stickers.length ? 'control-disabled' : ''}}" bindtap="changeGroup" role="button" aria-disabled="{{changingGroup || !stickers.length || collageActionPhase !== 'action-visible'}}">{{changingGroup ? '更换中' : '换一组'}}</view>
+            </view>
+          </view>
+          <view class="collage-board {{hasSavedCollage ? 'has-saved-collage' : 'has-generated-collage'}} {{memoryBoardPhase}}">
+            <block wx:if="{{hasSavedCollage}}">
+              <view class="saved-collage-preview {{savedCollageBoardPath ? 'has-board-background' : 'has-fallback-background'}}">
+                <image wx:if="{{savedCollageBoardPath}}" class="saved-collage-board-background" src="{{savedCollageBoardPath}}" mode="scaleToFill" style="{{collageBoardBackgroundStyle}}" aria-hidden="true" />
+                <view wx:else class="saved-collage-default-board" aria-hidden="true">
+                  <image src="/assets/ui/memory-collage-board.webp" mode="scaleToFill" webp />
+                </view>
+                <view class="saved-collage-item" wx:for="{{savedCollageItems}}" wx:key="itemId" style="{{item.style}}">
+                  <image class="sticker-outline-medium" src="{{item.imagePath}}" mode="aspectFit" webp />
+                </view>
+              </view>
+            </block>
+            <block wx:else>
+              <image class="collage-board-background" src="/assets/ui/memory-collage-board.webp" mode="scaleToFill" webp />
+              <view class="collage-stickers">
+                <view class="collage-sticker {{item.positionClass}}" wx:for="{{stickers}}" wx:key="id">
+                  <view class="sticker-pop-wrapper {{stickerPhase}}" style="animation-delay: {{stickerPhase === 'sticker-entering' ? item.popDelay : 0}}ms;">
+                    <image class="sticker-outline-medium" src="{{item.path}}" mode="aspectFit" webp />
+                  </view>
+                </view>
+              </view>
+              <text wx:if="{{!stickers.length}}" class="collage-empty">这一周期还没有可拼贴的记录</text>
+            </block>
+          </view>
+          <view class="save-memory-slot">
+            <button class="save-memory-button" bindtap="openCollageEditor">编辑</button>
+          </view>
+        </view>
+
+        <view class="memory-section footprint-section">
+          <view class="section-heading footprint-heading">
+            <text class="section-title">{{reportMode === 'month' ? '本月足迹' : '本周足迹'}}</text>
+            <view class="scope-chip" bindtap="openSelection" role="button"><text class="scope-label">{{scopeLabel}}</text></view>
+          </view>
+
+          <view wx:if="{{!hasData}}" class="footprint-empty memory-glass {{memoryHeatmapPhase}}">
+            <text>有记录后，足迹会按日期自动点亮</text>
+          </view>
+
+          <view wx:elif="{{reportMode === 'month'}}" class="month-footprint memory-glass {{memoryHeatmapPhase}}">
+            <view class="weekday-row">
+              <text>周日</text><text>周一</text><text>周二</text><text>周三</text><text>周四</text><text>周五</text><text>周六</text>
+            </view>
+            <view class="month-grid">
+              <view class="heat-cell heat-level-{{item.level}} {{!item.inMonth ? 'outside' : ''}} {{item.future ? 'future' : ''}}" wx:for="{{calendarCells}}" wx:key="date" aria-label="{{item.ariaLabel}}">
+                <text>{{item.inMonth ? item.day : ''}}</text>
+              </view>
+            </view>
+          </view>
+
+          <view wx:else class="week-footprint memory-glass {{memoryHeatmapPhase}}">
+            <text class="activity-summary">{{activitySummary}}</text>
+            <view class="week-activity-row">
+              <view class="week-activity heat-level-{{item.level}}" wx:for="{{weekCells}}" wx:key="date">
+                <text class="week-day">{{item.weekday}}</text>
+                <text class="week-count">{{item.countLabel}}</text>
+              </view>
+            </view>
+            <text wx:if="{{timeSummary}}" class="time-summary">{{timeSummary}}</text>
+          </view>
+        </view>
+
+      </block>
+
+      <view class="bottom-clearance"></view>
     </view>
+  </scroll-view>
+</view>
+
+<view wx:if="{{selectionOpen}}" class="beta-overlay memory-select-overlay sheet-motion-overlay {{selectionClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeSelection">
+  <view class="beta-sheet memory-select-sheet sheet-motion-panel {{selectionClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation">
+    <view class="beta-handle"></view>
+    <view class="sheet-title-row">
+      <text class="beta-sheet-title">选择{{reportMode === 'month' ? '月份' : '周次'}}和模块</text>
+      <view class="sheet-done" bindtap="applySelection" role="button">完成</view>
+    </view>
+    <view class="memory-month-selector">
+      <button bindtap="previousDraftPeriod" aria-label="上一周期"><image src="/assets/ui/icons/chevron-left.svg" /></button>
+      <text>{{draftPeriodLabel}}</text>
+      <button bindtap="nextDraftPeriod" disabled="{{!draftCanGoNext}}" aria-label="下一周期"><image src="/assets/ui/icons/chevron-right.svg" /></button>
+    </view>
+    <text class="filter-label">统计范围</text>
+    <scroll-view class="memory-module-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view class="memory-module-options">
+        <button class="{{item.selected ? 'selected' : ''}}" wx:for="{{filterModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtap="selectDraftModule">
+          <text>{{item.name}}</text><text wx:if="{{item.selected}}" class="selected-check">✓</text>
+        </button>
+      </view>
+    </scroll-view>
   </view>
 </view>
-<view wx:if="{{selectionOpen}}" class="beta-overlay memory-select-overlay sheet-motion-overlay {{selectionClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeSelection"><view class="beta-sheet memory-select-sheet sheet-motion-panel {{selectionClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">选择模块和月份</text><view class="memory-month-selector"><view bindtap="previousMonth"><image src="/assets/ui/icons/chevron-left.svg" /></view><text>{{monthLabel}}</text><view bindtap="nextMonth"><image src="/assets/ui/icons/chevron-right.svg" /></view></view><view class="memory-module-options"><button class="{{moduleId === item.moduleId ? 'selected' : ''}}" wx:for="{{modules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtap="selectModule">{{item.name}}</button></view></view></view>
+
 <privacy-dialog />

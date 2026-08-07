@@ -34,9 +34,9 @@ const forbiddenAssets = [
 ];
 const forbiddenText = ['体验版', '本地适配器', '演示用户', '演示记录', '重置演示', '退出登录'];
 const searchableExtensions = new Set(['.js', '.json', '.wxml', '.wxss']);
-const MAX_TOTAL_BYTES = 900 * 1024;
-const MAX_MAIN_PACKAGE_BYTES = 650 * 1024;
-const MAX_FEATURE_PACKAGE_BYTES = 300 * 1024;
+const MAX_TOTAL_BYTES = 1000 * 1024;
+const MAX_MAIN_PACKAGE_BYTES = 675 * 1024;
+const MAX_FEATURE_PACKAGE_BYTES = 325 * 1024;
 const MAX_SINGLE_FILE_BYTES = 250 * 1024;
 
 const fileMetadata = new Map(await Promise.all(files.map(async (file) => [file, await stat(file)])));

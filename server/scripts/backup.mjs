@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, mkdirSync, statfsSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import { beijingIso } from '../../scripts/lib/time.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).map((item) => {
   const [key, ...value] = item.replace(/^--/, '').split('=');
@@ -22,7 +23,7 @@ const outputDirectory = resolve(args['output-dir'] ?? '../backups');
 mkdirSync(outputDirectory, { recursive: true });
 const freeBytes = Number(statfsSync(outputDirectory).bavail) * Number(statfsSync(outputDirectory).bsize);
 if (freeBytes < 512 * 1024 * 1024) throw new Error('Backup aborted: less than 512 MiB free space');
-const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+const timestamp = beijingIso().replace(/[:.]/g, '-');
 const release = String(args.release ?? process.env.RELEASE_ID ?? 'manual').replace(/[^a-zA-Z0-9._+-]/g, '_');
 const output = resolve(outputDirectory, `${environment}-${database}-${release}-${timestamp}.sql`);
 

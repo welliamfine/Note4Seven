@@ -1,7 +1,7 @@
 <view wx:if="{{!hidden}}" class="tab-shell safe-bottom">
   <view class="tab-pill">
     <button class="tab-item {{selected === index ? 'tab-active' : ''}}" wx:for="{{tabs}}" wx:key="pagePath" data-index="{{index}}" data-path="{{item.pagePath}}" bindtap="switchTab">
-      <view class="tab-icon-wrap"><image src="{{item.icon}}" mode="aspectFit" /><text wx:if="{{index === 3 && profileHasUnread}}" class="tab-unread-dot"></text></view>
+      <view class="tab-icon-wrap"><view class="tab-icon-clip"><image class="tab-icon-sprite tab-icon-sprite-{{index}} {{selected === index ? 'tab-icon-sprite-selected' : ''}}" src="/assets/ui/custom-icons/tab-sprite.png" mode="scaleToFill" /></view><text wx:if="{{index === 3 && profileHasUnread}}" class="tab-unread-dot"></text></view>
       <text>{{item.text}}</text>
     </button>
   </view>

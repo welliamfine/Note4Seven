@@ -1,10 +1,12 @@
 import type { CalendarCell, LifeModule, LifeRecord, MediaStatus, ReactionEmoji, User } from '../../types/domain';
 import {
   cancelProcessingCheckin,
+  cancelStreakRewardRule,
   currentUserRecord,
   createModuleInvite,
   deleteRecord,
   discardPrewarmedMediaUpload,
+  discardMedia,
   getCalendar,
   getCheckinProcessingStatus,
   getCurrentUser,
@@ -13,19 +15,27 @@ import {
   getModuleInbox,
   getModuleInboxCount,
   getModuleMonthSummary,
+  getPendingStreakRewards,
+  getMyStreakRewardRule,
   getModule,
   refreshModule,
   getReactionOptions,
   getRecordReactions,
   processMedia,
   prewarmMediaUpload,
+  previewStreakReward,
   refreshModuleMonthSummary,
   refreshMediaStickerSources,
   retryCheckinMatting,
+  revealStreakReward,
+  saveStreakRewardRule,
   saveRecord,
   setRecordReaction,
   submitMakeupRecord,
   type ReactionView,
+  type PendingStreakReward,
+  type RevealedStreakReward,
+  type StreakRewardRuleView,
 } from '../../services/api';
 import { track } from '../../services/tracker';
 import { invalidateModuleGallery, prefetchModuleGallery } from '../../services/gallery-cache';
@@ -44,6 +54,7 @@ import { createId } from '../../utils/id';
 import { pollIntervalForElapsed, waitingCopy } from '../../utils/checkin-processing';
 import { waitForSheetMotion } from '../../utils/sheet-motion';
 import { STICKER_MOTION, waitForAppRouteDone } from '../../utils/sticker-motion';
+import { REWARD_MOTION, type RewardMotionPhase } from '../../utils/reward-motion';
 import { preloadImageSources } from '../../utils/image-preload';
 import { mergeMemberSnapshot } from '../../utils/member-sync';
 import {
@@ -89,6 +100,23 @@ interface ModuleDetailCacheEntry {
   calendar: CalendarCell[];
 }
 
+interface RewardTargetOption {
+  label: string;
+  targetType: 'all' | 'member';
+  memberInstanceId?: string;
+}
+
+interface RewardRuleDisplay {
+  rewardRuleId: string;
+  targetLabel: string;
+  conditionLabel: string;
+  prizeTitle: string;
+  winProbability: number;
+  progressLabel: string;
+  status: string;
+  statusLabel: string;
+}
+
 let mediaProgressTimer: ReturnType<typeof setInterval> | undefined;
 let calendarTouchStartX = 0;
 let monthTransitionToken = 0;
@@ -106,11 +134,25 @@ let calendarSyncInFlight = false;
 let calendarPageVisible = false;
 let calendarSyncGeneration = 0;
 let freshCalendarStickerTimers: Array<ReturnType<typeof setTimeout>> = [];
+let rewardMotionTimer: ReturnType<typeof setTimeout> | undefined;
 const moduleDetailCache = new Map<string, ModuleDetailCacheEntry>();
 
 const moduleDetailCacheKey = (moduleId: string, month: string) => `${moduleId}:${month}`;
 
 const MEMBER_CALENDAR_MOTION_DURATION = 260;
+
+const clearRewardMotionTimer = () => {
+  if (rewardMotionTimer) clearTimeout(rewardMotionTimer);
+  rewardMotionTimer = undefined;
+};
+
+const scheduleRewardMotion = (callback: () => void, delay: number) => {
+  clearRewardMotionTimer();
+  rewardMotionTimer = setTimeout(() => {
+    rewardMotionTimer = undefined;
+    callback();
+  }, delay);
+};
 const CALENDAR_SYNC_INTERVAL = 5_000;
 
 const slotsForMembers = (memberCount: number): string[] => {
@@ -245,6 +287,7 @@ Page({
     editorOriginalPath: '',
     editorMediaId: '',
     editorStickerPath: '',
+    editorMediaVariant: 'sticker' as 'sticker' | 'original',
     editorStickerFallbackPath: '',
     editorStickerRefreshAttempts: 0,
     editorStickerPhase: 'sticker-hidden',
@@ -262,6 +305,39 @@ Page({
     photoSourceOpen: false,
     photoSourceClosing: false,
     saving: false,
+    rewardSettingsOpen: false,
+    rewardSettingsClosing: false,
+    rewardSettingsMode: 'form' as 'form' | 'list',
+    rewardRuleListClosing: false,
+    rewardView: null as StreakRewardRuleView | null,
+    rewardRules: [] as RewardRuleDisplay[],
+    rewardTargetOptions: [] as RewardTargetOption[],
+    rewardTargetIndex: 0,
+    rewardStreakDays: '7',
+    rewardPrizeTitle: '',
+    rewardPrizeDescription: '',
+    rewardCoverMediaId: '',
+    rewardCoverPath: '/subpackages/reward-assets/default-cover.png',
+    rewardCoverStatus: 'idle' as 'idle' | 'processing' | 'ready' | 'failed',
+    rewardCoverProgress: 0,
+    rewardProbability: 80 as 20 | 50 | 80 | 100,
+    rewardAgreement: false,
+    rewardSaving: false,
+    rewardCancellingId: '',
+    rewardPreviewingId: '',
+    rewardOpen: false,
+    rewardOpening: false,
+    rewardCardFlipped: false,
+    rewardMotion: REWARD_MOTION,
+    rewardMotionPhase: 'idle' as RewardMotionPhase,
+    pendingReward: null as PendingStreakReward | null,
+    pendingRewards: [] as PendingStreakReward[],
+    rewardPendingIndex: 0,
+    rewardPendingCount: 0,
+    rewardBatchResults: [] as RevealedStreakReward[],
+    revealedReward: null as RevealedStreakReward | null,
+    rewardPreviewResult: null as RevealedStreakReward | null,
+    rewardDateRange: '',
   },
 
   onLoad(query: Record<string, string | undefined>) {
@@ -284,6 +360,9 @@ Page({
       : this.loadAll(true, true);
     void initialLoad.then(() => {
       if (requestedDate && this.data.module) void this.openDateValue(requestedDate);
+      if (!requestedDate) {
+        void this.maybeShowStreakReward();
+      }
       if (cached && calendarPageVisible) void this.syncCalendarInBackground();
     });
   },
@@ -299,6 +378,7 @@ Page({
       this.applyTodoBadge();
       void this.syncCalendarInBackground();
       void this.replayCalendarStickers();
+      void this.maybeShowStreakReward();
     }
   },
 
@@ -316,11 +396,153 @@ Page({
     finishCalendarMotion();
     cancelStickerTimeline();
     clearEditorStickerTimers();
+    clearRewardMotionTimer();
     invalidateEditorMediaTask();
     if (memberCalendarMotionTimer) clearTimeout(memberCalendarMotionTimer);
     memberCalendarMotionTimer = undefined;
     discardPrewarmedMediaUpload(this.data.moduleId);
     if (mediaProgressTimer) clearInterval(mediaProgressTimer);
+  },
+
+  async maybeShowStreakReward() {
+    if (!this.data.moduleId || this.data.module?.recordPolicy !== 'strict' || this.data.rewardOpen
+      || this.data.editorOpen || this.data.dateSheetOpen || this.data.photoSourceOpen || this.data.rewardSettingsOpen) return;
+    try {
+      const pendingRewards = await getPendingStreakRewards(this.data.moduleId);
+      const pendingReward = pendingRewards[0];
+      if (!pendingReward || this.data.rewardOpen || this.data.editorOpen || this.data.dateSheetOpen) return;
+      this.setData({
+        rewardOpen: true,
+        rewardOpening: false,
+        rewardCardFlipped: false,
+        rewardMotionPhase: 'entering',
+        pendingReward,
+        pendingRewards,
+        rewardPendingIndex: 0,
+        rewardPendingCount: pendingRewards.length,
+        rewardBatchResults: [],
+        revealedReward: null,
+        rewardPreviewResult: null,
+        rewardDateRange: `${pendingReward.windowStart.replace(/-/g, '.')} — ${pendingReward.windowEnd.replace(/-/g, '.')}`,
+      }, () => this.startRewardEntryMotion());
+      track('streak_reward_prompt_view', { moduleId: this.data.moduleId, targetType: pendingReward.targetType });
+    } catch (error) {
+      console.error('[streak-reward] pending query failed', error);
+    }
+  },
+
+  async revealReward() {
+    const pendingReward = this.data.pendingReward;
+    if (!pendingReward || this.data.rewardOpening || this.data.rewardCardFlipped) return;
+    this.setData({ rewardOpening: true });
+    try {
+      const revealedReward = this.data.rewardPreviewResult
+        ?? await revealStreakReward(pendingReward.rewardDrawId);
+      if (revealedReward.stickerPath) await preloadImageSources([revealedReward.stickerPath]);
+      this.setData({
+        revealedReward,
+        rewardCardFlipped: true,
+        rewardMotionPhase: 'flipping',
+      }, () => this.finishRewardRevealMotion());
+      wx.vibrateShort?.({ type: 'light' });
+      track('streak_reward_revealed', { moduleId: this.data.moduleId, resultType: revealedReward.resultType });
+    } catch (error) {
+      this.setData({ rewardOpening: false });
+      console.error('[streak-reward] reveal failed', error);
+      wx.showToast({ title: '暂时无法拆开，请稍后重试', icon: 'none' });
+    }
+  },
+
+  async revealAllRewards() {
+    if (this.data.rewardOpening || this.data.rewardPreviewResult || this.data.pendingRewards.length < 2) return;
+    this.setData({ rewardOpening: true });
+    try {
+      const rewardBatchResults = await Promise.all(
+        this.data.pendingRewards.map((reward) => revealStreakReward(reward.rewardDrawId)),
+      );
+      await preloadImageSources(rewardBatchResults.flatMap((reward) => [reward.stickerPath, reward.coverPath]
+        .filter((path): path is string => Boolean(path))));
+      this.setData({
+        rewardBatchResults,
+        rewardMotionPhase: 'flipping',
+      }, () => this.finishRewardRevealMotion());
+      wx.vibrateShort?.({ type: 'light' });
+    } catch (error) {
+      this.setData({ rewardOpening: false });
+      console.error('[streak-reward] reveal all failed', error);
+      wx.showToast({ title: '暂时无法全部拆开', icon: 'none' });
+    }
+  },
+
+  acceptReward() {
+    if (this.data.rewardOpening || this.data.rewardMotionPhase === 'advancing'
+      || this.data.rewardMotionPhase === 'collecting' || this.data.rewardMotionPhase === 'closing') return;
+    const nextIndex = this.data.rewardPendingIndex + 1;
+    if (!this.data.rewardPreviewResult && nextIndex < this.data.pendingRewards.length) {
+      const pendingReward = this.data.pendingRewards[nextIndex];
+      this.setData({ rewardMotionPhase: 'advancing' });
+      scheduleRewardMotion(() => {
+        if (!this.data.rewardOpen || this.data.rewardMotionPhase !== 'advancing') return;
+        this.setData({
+          pendingReward,
+          rewardPendingIndex: nextIndex,
+          rewardCardFlipped: false,
+          rewardMotionPhase: 'entering',
+          revealedReward: null,
+          rewardDateRange: `${pendingReward.windowStart.replace(/-/g, '.')} — ${pendingReward.windowEnd.replace(/-/g, '.')}`,
+        }, () => this.startRewardEntryMotion());
+      }, REWARD_MOTION.advanceDuration);
+      return;
+    }
+    this.collectReward();
+  },
+
+  closeReward() {
+    if (this.data.rewardOpening || this.data.rewardMotionPhase === 'closing'
+      || this.data.rewardMotionPhase === 'collecting') return;
+    this.setData({ rewardMotionPhase: 'closing' });
+    scheduleRewardMotion(() => this.resetRewardDialog(), REWARD_MOTION.closeDuration);
+  },
+
+  collectReward() {
+    if (this.data.rewardOpening || this.data.rewardMotionPhase === 'closing'
+      || this.data.rewardMotionPhase === 'collecting') return;
+    this.setData({ rewardMotionPhase: 'collecting' });
+    scheduleRewardMotion(() => this.resetRewardDialog(), REWARD_MOTION.collectDuration);
+  },
+
+  startRewardEntryMotion() {
+    scheduleRewardMotion(() => {
+      if (this.data.rewardOpen && this.data.rewardMotionPhase === 'entering') {
+        this.setData({ rewardMotionPhase: 'visible' });
+      }
+    }, REWARD_MOTION.entryDuration);
+  },
+
+  finishRewardRevealMotion() {
+    scheduleRewardMotion(() => {
+      if (this.data.rewardOpen && this.data.rewardMotionPhase === 'flipping') {
+        this.setData({ rewardOpening: false, rewardMotionPhase: 'visible' });
+      }
+    }, REWARD_MOTION.flipDuration);
+  },
+
+  resetRewardDialog() {
+    clearRewardMotionTimer();
+    this.setData({
+      rewardOpen: false,
+      rewardOpening: false,
+      rewardCardFlipped: false,
+      rewardMotionPhase: 'idle',
+      pendingReward: null,
+      pendingRewards: [],
+      rewardPendingIndex: 0,
+      rewardPendingCount: 0,
+      rewardBatchResults: [],
+      revealedReward: null,
+      rewardPreviewResult: null,
+      rewardDateRange: '',
+    });
   },
 
   async loadAll(showLoading = true, animateEntry = false, cached?: ModuleDetailCacheEntry) {
@@ -1029,7 +1251,7 @@ Page({
   },
 
   closeDateSheet() {
-    void this.dismissDateSheet();
+    void this.dismissDateSheet().then(() => this.maybeShowStreakReward());
   },
 
   async onDatePrimaryAction() {
@@ -1082,7 +1304,8 @@ Page({
       editorDate: targetDate,
       editorOriginalPath: record?.originalPath ?? '',
       editorMediaId: record?.mediaId ?? '',
-      editorStickerPath: record?.stickerPath ?? '',
+      editorStickerPath: record?.generatedStickerPath ?? record?.stickerPath ?? '',
+      editorMediaVariant: record?.mediaVariant ?? 'sticker',
       editorStickerFallbackPath: '',
       editorStickerRefreshAttempts: 0,
       editorStickerPhase: record ? 'sticker-hidden' : 'sticker-visible',
@@ -1208,6 +1431,7 @@ Page({
     this.setData({
       editorOriginalPath: tempPath,
       editorStickerPath: '',
+      editorMediaVariant: 'sticker',
       editorStickerFallbackPath: '',
       editorStickerRefreshAttempts: 0,
       editorStickerPhase: 'sticker-hidden',
@@ -1244,6 +1468,7 @@ Page({
       );
       if (token !== editorMediaTaskToken || !this.data.editorOpen) return;
       this.setData({
+        editorOriginalPath: media.originalPath,
         editorMediaId: media.mediaId,
         editorStickerPath: media.stickerPath,
         editorStickerFallbackPath: media.stickerFallbackPath ?? '',
@@ -1280,12 +1505,12 @@ Page({
   },
 
   onEditorStickerLoad() {
-    if (this.data.editorMediaStatus !== 'ready') return;
+    if (this.data.editorMediaStatus !== 'ready' || this.data.editorMediaVariant !== 'sticker') return;
     this.playEditorStickerAnimation();
   },
 
   async onEditorStickerLoadError(event: WechatMiniprogram.ImageError) {
-    if (this.data.editorMediaStatus !== 'ready') return;
+    if (this.data.editorMediaStatus !== 'ready' || this.data.editorMediaVariant !== 'sticker') return;
     console.warn('[checkin-media] sticker image load failed', event.detail);
     const fallbackPath = this.data.editorStickerFallbackPath;
     if (fallbackPath && fallbackPath !== this.data.editorStickerPath) {
@@ -1324,6 +1549,23 @@ Page({
       editorMediaError: '贴纸已经生成，但图片加载失败，请检查网络后重试',
       editorMediaRetryable: true,
     });
+  },
+
+  toggleEditorMediaVariant() {
+    if (this.data.editorMediaStatus !== 'ready') return;
+    const nextVariant = this.data.editorMediaVariant === 'sticker' ? 'original' : 'sticker';
+    if (nextVariant === 'original' && !this.data.editorOriginalPath) {
+      wx.showToast({ title: '原图暂时无法加载', icon: 'none' });
+      return;
+    }
+    this.setData({
+      editorMediaVariant: nextVariant,
+      editorDirty: true,
+      editorStickerPhase: nextVariant === 'sticker' ? 'sticker-hidden' : this.data.editorStickerPhase,
+    }, () => {
+      if (nextVariant === 'sticker') this.playEditorStickerAnimation();
+    });
+    track('record_media_variant_toggle', { mediaVariant: nextVariant });
   },
 
   saveLocalFile(tempPath: string): Promise<string> {
@@ -1368,6 +1610,7 @@ Page({
       if (status.displayStatus === 'ready' && status.stickerUrl) {
         this.setData({
           editorMediaId: status.mediaId,
+          editorOriginalPath: status.originalUrl ?? this.data.editorOriginalPath,
           editorStickerPath: status.stickerUrl,
           editorStickerFallbackPath: '',
           editorStickerRefreshAttempts: 0,
@@ -1416,22 +1659,32 @@ Page({
     this.setData({ saving: true });
     try {
       if (this.data.editorProcessingCheckinId) {
+        const savedRecord = await saveRecord({
+          moduleId: this.data.moduleId,
+          recordId: this.data.editorProcessingCheckinId,
+          recordDate: editorDate,
+          originalPath: this.data.editorOriginalPath,
+          stickerPath: this.data.editorStickerPath,
+          remark: this.data.editorRemark,
+          clientRequestId: createId('request'),
+          mediaId: this.data.editorMediaId,
+          mediaVariant: this.data.editorMediaVariant,
+        });
         this.setData({ saving: false });
         await this.dismissEditor();
         invalidateModuleGallery(this.data.moduleId, editorDate.slice(0, 7));
-        const snapshot = await getCalendar(this.data.moduleId, this.data.month);
-        await this.applyCalendarSnapshot(snapshot);
-        const record = snapshot.find((cell) => cell.date === this.data.today)?.records
-          .find((item) => item.userId === this.data.currentUser?.userId);
-        if (record && record.recordDate === this.data.today) {
-          void queueHomePreviewUpdate({
+        const homePreviewReady = savedRecord.recordDate === this.data.today
+          ? queueHomePreviewUpdate({
             type: 'upsert',
-            moduleId: record.moduleId,
-            recordId: record.recordId,
-            memberInstanceId: record.memberInstanceId,
-            stickerPath: record.stickerPath,
-          });
-        }
+            moduleId: savedRecord.moduleId,
+            recordId: savedRecord.recordId,
+            memberInstanceId: savedRecord.memberInstanceId,
+            stickerPath: savedRecord.stickerPath,
+          })
+          : Promise.resolve();
+        await this.applyCalendarSnapshot(this.calendarSnapshotWithRecord(savedRecord), homePreviewReady);
+        wx.showToast({ title: '记录已保存' });
+        await this.maybeShowStreakReward();
         return;
       }
       const makeupResult = this.data.editorMode === 'makeup'
@@ -1443,6 +1696,7 @@ Page({
             remark: this.data.editorRemark,
             clientRequestId: createId('request'),
             mediaId: this.data.editorMediaId,
+            mediaVariant: this.data.editorMediaVariant,
           })
         : null;
       const savedRecord = makeupResult ? null : await saveRecord({
@@ -1454,6 +1708,7 @@ Page({
           remark: this.data.editorRemark,
           clientRequestId: createId('request'),
           mediaId: this.data.editorMediaId,
+          mediaVariant: this.data.editorMediaVariant,
         });
       let homePreviewReady = Promise.resolve();
       if (savedRecord && savedRecord.recordDate === this.data.today) {
@@ -1481,7 +1736,22 @@ Page({
           ? (makeupResult.approval ? '补卡申请已提交' : '补卡已生效')
           : (this.data.editorMode === 'edit' ? '记录已更新' : '记录已保存'),
       });
+      if (savedRecord && !previousRecordId && savedRecord.recordDate === this.data.today) {
+        await this.maybeShowStreakReward();
+      }
     } catch (error) {
+      console.error('[record-save] failed', error);
+      if (!previousRecordId && error instanceof Error && error.message === 'RECORD_ALREADY_EXISTS') {
+        const recovered = currentUserRecord(await getDateRecords(this.data.moduleId, editorDate).catch(() => []));
+        if (recovered) {
+          this.setData({ saving: false });
+          await this.dismissEditor();
+          invalidateModuleGallery(this.data.moduleId, editorDate.slice(0, 7));
+          await this.applyCalendarSnapshot(this.calendarSnapshotWithRecord(recovered));
+          wx.showToast({ title: '记录已保存' });
+          return;
+        }
+      }
       this.setData({ saving: false });
       wx.showToast({ title: error instanceof Error && error.message === 'RECORD_DATE_LOCKED' ? '日期已跨天，请刷新' : '保存失败，请重试', icon: 'none' });
     }
@@ -1542,6 +1812,293 @@ Page({
 
   openTodo() {
     void wx.navigateTo({ url: `/subpackages/module-todo/index?moduleId=${this.data.moduleId}` });
+  },
+
+  async openRewardSettings() {
+    const module = this.data.module;
+    if (!module || module.recordPolicy !== 'strict') return;
+    const rewardTargetOptions: RewardTargetOption[] = [
+      { label: '全员', targetType: 'all' },
+      ...module.members.filter((member) => member.active).map((member) => ({
+        label: member.userId === this.data.currentUser?.userId ? '我' : member.nickname,
+        targetType: 'member' as const,
+        memberInstanceId: member.memberInstanceId,
+      })),
+    ];
+    this.setData({
+      rewardSettingsOpen: true,
+      rewardSettingsClosing: false,
+      rewardSettingsMode: 'form',
+      rewardRuleListClosing: false,
+      rewardTargetOptions,
+      rewardTargetIndex: 0,
+      rewardStreakDays: '7',
+      rewardPrizeTitle: '',
+      rewardPrizeDescription: '',
+      rewardCoverMediaId: '',
+      rewardCoverPath: '/subpackages/reward-assets/default-cover.png',
+      rewardCoverStatus: 'idle',
+      rewardCoverProgress: 0,
+      rewardProbability: 80,
+      rewardAgreement: false,
+    });
+    try {
+      this.applyRewardRuleView(await getMyStreakRewardRule(this.data.moduleId));
+    } catch (error) {
+      console.error('[streak-reward] rule list failed', error);
+      wx.showToast({ title: '彩蛋列表加载失败', icon: 'none' });
+    }
+    track('streak_reward_settings_view', { moduleId: this.data.moduleId });
+  },
+
+  applyRewardRuleView(rewardView: StreakRewardRuleView) {
+    const statusLabels: Record<string, string> = {
+      active: '等待触发',
+      triggered: '已触发',
+      cancelled: '已取消',
+      expired: '已过期',
+    };
+    this.setData({
+      rewardView,
+      rewardRules: rewardView.rules.map(({ rule, progressDays, targetMemberName }) => ({
+        rewardRuleId: rule.rewardRuleId,
+        targetLabel: rule.targetType === 'all' ? '全员' : (targetMemberName ?? '指定成员'),
+        conditionLabel: `连续打卡 ${rule.streakDays} 天`,
+        prizeTitle: rule.prizeTitle,
+        winProbability: rule.winProbability,
+        progressLabel: rule.status === 'active' ? `当前 ${progressDays} / ${rule.streakDays} 天` : '',
+        status: rule.status,
+        statusLabel: statusLabels[rule.status] ?? rule.status,
+      })),
+    });
+  },
+
+  async dismissRewardSettings() {
+    if (!this.data.rewardSettingsOpen || this.data.rewardSettingsClosing) return;
+    this.setData({
+      rewardSettingsClosing: true,
+      rewardRuleListClosing: this.data.rewardSettingsMode === 'list',
+    });
+    await waitForSheetMotion();
+    if (!this.data.rewardSettingsClosing) return;
+    const unusedCoverMediaId = this.data.rewardCoverMediaId;
+    this.setData({
+      rewardSettingsOpen: false,
+      rewardSettingsClosing: false,
+      rewardSettingsMode: 'form',
+      rewardRuleListClosing: false,
+      rewardTargetIndex: 0,
+      rewardStreakDays: '7',
+      rewardPrizeTitle: '',
+      rewardPrizeDescription: '',
+      rewardCoverMediaId: '',
+      rewardCoverPath: '/subpackages/reward-assets/default-cover.png',
+      rewardCoverStatus: 'idle',
+      rewardCoverProgress: 0,
+      rewardProbability: 80,
+      rewardAgreement: false,
+      rewardSaving: false,
+    });
+    if (unusedCoverMediaId) void discardMedia(unusedCoverMediaId).catch(() => undefined);
+  },
+
+  closeRewardSettings() {
+    if (!this.data.rewardSaving && !this.data.rewardCancellingId && !this.data.rewardPreviewingId) {
+      void this.dismissRewardSettings().then(() => this.maybeShowStreakReward());
+    }
+  },
+
+  showRewardRuleList() {
+    if (this.data.rewardSettingsClosing || this.data.rewardRuleListClosing || this.data.rewardSettingsMode === 'list') return;
+    this.setData({ rewardSettingsMode: 'list', rewardRuleListClosing: false });
+  },
+
+  async dismissRewardRuleList() {
+    if (this.data.rewardSettingsMode !== 'list' || this.data.rewardRuleListClosing) return;
+    this.setData({ rewardRuleListClosing: true });
+    await waitForSheetMotion();
+    if (!this.data.rewardRuleListClosing || this.data.rewardSettingsClosing) return;
+    this.setData({ rewardSettingsMode: 'form', rewardRuleListClosing: false });
+  },
+
+  showRewardRuleForm() {
+    void this.dismissRewardRuleList();
+  },
+  onRewardTarget(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    this.setData({ rewardTargetIndex: Number(event.detail.value) || 0 });
+  },
+  onRewardStreakDays(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    this.setData({ rewardStreakDays: event.detail.value.replace(/\D/g, '').slice(0, 3) });
+  },
+  onRewardPrizeTitle(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    this.setData({ rewardPrizeTitle: event.detail.value });
+  },
+  onRewardPrizeDescription(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    this.setData({ rewardPrizeDescription: event.detail.value });
+  },
+  chooseRewardCover() {
+    if (this.data.rewardCoverStatus === 'processing') return;
+    const previousCoverMediaId = this.data.rewardCoverMediaId;
+    wx.chooseMedia({
+      count: 1,
+      mediaType: ['image'],
+      sourceType: ['album'],
+      sizeType: ['compressed'],
+      success: ({ tempFiles }) => {
+        const path = tempFiles[0]?.tempFilePath;
+        if (!path) return;
+        if (previousCoverMediaId) void discardMedia(previousCoverMediaId).catch(() => undefined);
+        this.setData({ rewardCoverStatus: 'processing', rewardCoverProgress: 0, rewardCoverPath: path });
+        void processMedia(
+          path,
+          this.data.moduleId,
+          (rewardCoverProgress) => this.setData({ rewardCoverProgress }),
+          () => this.setData({ rewardCoverProgress: 100 }),
+          'gallery',
+        ).then((media) => {
+          this.setData({
+            rewardCoverMediaId: media.mediaId,
+            rewardCoverPath: media.stickerPath,
+            rewardCoverStatus: 'ready',
+            rewardCoverProgress: 100,
+          });
+        }).catch((error) => {
+          console.error('[streak-reward] cover processing failed', error);
+          this.setData({
+            rewardCoverMediaId: '',
+            rewardCoverPath: '/subpackages/reward-assets/default-cover.png',
+            rewardCoverStatus: 'failed',
+          });
+          wx.showToast({ title: mediaErrorCopy(error), icon: 'none' });
+        });
+      },
+    });
+  },
+  resetRewardCover() {
+    if (this.data.rewardCoverStatus === 'processing') return;
+    const unusedCoverMediaId = this.data.rewardCoverMediaId;
+    this.setData({
+      rewardCoverMediaId: '',
+      rewardCoverPath: '/subpackages/reward-assets/default-cover.png',
+      rewardCoverStatus: 'idle',
+      rewardCoverProgress: 0,
+    });
+    if (unusedCoverMediaId) void discardMedia(unusedCoverMediaId).catch(() => undefined);
+  },
+  openRewardCollection() {
+    void wx.navigateTo({ url: `/subpackages/reward-collection/index?moduleId=${this.data.moduleId}` });
+  },
+  chooseRewardProbability(event: WechatMiniprogram.TouchEvent) {
+    const value = Number(event.currentTarget.dataset.probability);
+    if (value === 20 || value === 50 || value === 80 || value === 100) this.setData({ rewardProbability: value });
+  },
+  onRewardAgreement(event: WechatMiniprogram.CustomEvent<{ value: string[] }>) {
+    this.setData({ rewardAgreement: event.detail.value.includes('accepted') });
+  },
+
+  async saveRewardRule() {
+    if (this.data.rewardSaving) return;
+    const target = this.data.rewardTargetOptions[this.data.rewardTargetIndex];
+    const streakDays = Number(this.data.rewardStreakDays);
+    const prizeTitle = this.data.rewardPrizeTitle.trim();
+    const prizeDescription = this.data.rewardPrizeDescription.trim();
+    if (!target) {
+      wx.showToast({ title: '请选择达成人员', icon: 'none' });
+      return;
+    }
+    if (!Number.isInteger(streakDays) || streakDays < 1 || streakDays > 100) {
+      wx.showToast({ title: '连续天数请输入1至100', icon: 'none' });
+      return;
+    }
+    if (!prizeTitle || prizeTitle.length > 20 || prizeDescription.length > 80) {
+      wx.showToast({ title: '请填写20字内礼物名和80字内说明', icon: 'none' });
+      return;
+    }
+    if (!this.data.rewardAgreement) {
+      wx.showToast({ title: '请先确认线下兑现说明', icon: 'none' });
+      return;
+    }
+    if (this.data.rewardCoverStatus === 'processing') {
+      wx.showToast({ title: '请等待奖励封面处理完成', icon: 'none' });
+      return;
+    }
+    this.setData({ rewardSaving: true });
+    try {
+      const rewardView = await saveStreakRewardRule(this.data.moduleId, {
+        targetType: target.targetType,
+        targetMemberInstanceId: target.memberInstanceId,
+        streakDays,
+        prizeTitle,
+        prizeDescription,
+        coverMediaId: this.data.rewardCoverMediaId || undefined,
+        coverPath: this.data.rewardCoverMediaId ? this.data.rewardCoverPath : undefined,
+        winProbability: this.data.rewardProbability,
+        termsAccepted: true,
+      });
+      this.applyRewardRuleView(rewardView);
+      this.setData({
+        rewardSaving: false,
+        rewardCoverMediaId: '',
+      });
+      await this.dismissRewardSettings();
+      wx.showToast({ title: '奖励彩蛋已藏好' });
+    } catch (error) {
+      console.error('[streak-reward] save failed', error);
+      this.setData({ rewardSaving: false });
+      wx.showToast({ title: '奖励设置保存失败', icon: 'none' });
+    }
+  },
+
+  async cancelRewardRule(event: WechatMiniprogram.TouchEvent) {
+    const rewardRuleId = String(event.currentTarget.dataset.ruleId ?? '');
+    if (!rewardRuleId || this.data.rewardCancellingId) return;
+    const result = await wx.showModal({
+      title: '取消这份彩蛋？',
+      content: '取消后不会再触发，已经发出的奖励不受影响。',
+      confirmText: '确认取消',
+      confirmColor: '#b85f58',
+    });
+    if (!result.confirm) return;
+    this.setData({ rewardCancellingId: rewardRuleId });
+    try {
+      await cancelStreakRewardRule(this.data.moduleId, rewardRuleId);
+      this.applyRewardRuleView(await getMyStreakRewardRule(this.data.moduleId));
+      this.setData({ rewardCancellingId: '' });
+      wx.showToast({ title: '彩蛋已取消' });
+    } catch {
+      this.setData({ rewardCancellingId: '' });
+      wx.showToast({ title: '取消失败，请稍后重试', icon: 'none' });
+    }
+  },
+
+  async previewRewardRule(event: WechatMiniprogram.TouchEvent) {
+    const rewardRuleId = String(event.currentTarget.dataset.ruleId ?? '');
+    if (!rewardRuleId || this.data.rewardPreviewingId) return;
+    this.setData({ rewardPreviewingId: rewardRuleId });
+    try {
+      const preview = await previewStreakReward(this.data.moduleId, rewardRuleId);
+      if (preview.revealed.stickerPath) await preloadImageSources([preview.revealed.stickerPath]);
+      await this.dismissRewardSettings();
+      this.setData({
+        rewardPreviewingId: '',
+        rewardOpen: true,
+        rewardOpening: false,
+        rewardCardFlipped: false,
+        rewardMotionPhase: 'entering',
+        pendingReward: preview.pending,
+        pendingRewards: [preview.pending],
+        rewardPendingIndex: 0,
+        rewardPendingCount: 1,
+        rewardBatchResults: [],
+        revealedReward: null,
+        rewardPreviewResult: preview.revealed,
+        rewardDateRange: `${preview.pending.windowStart.replace(/-/g, '.')} — ${preview.pending.windowEnd.replace(/-/g, '.')}`,
+      }, () => this.startRewardEntryMotion());
+    } catch (error) {
+      console.error('[streak-reward] preview failed', error);
+      this.setData({ rewardPreviewingId: '' });
+      wx.showToast({ title: '奖励预览加载失败', icon: 'none' });
+    }
   },
 
   openGallery() {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { daysBetweenShanghai, isoWithShanghaiOffset, shanghaiDate } from '../src/lib/time';
+import {
+  BEIJING_TIME_ZONE,
+  BEIJING_UTC_OFFSET,
+  daysBetweenShanghai,
+  isoWithShanghaiOffset,
+  shanghaiDate,
+} from '../src/lib/time';
 
 describe('Shanghai business time', () => {
   it('moves to the next business day at Shanghai midnight', () => {
@@ -14,6 +20,8 @@ describe('Shanghai business time', () => {
   });
 
   it('formats response timestamps with +08:00', () => {
+    expect(BEIJING_TIME_ZONE).toBe('Asia/Shanghai');
+    expect(BEIJING_UTC_OFFSET).toBe('+08:00');
     expect(isoWithShanghaiOffset(new Date('2026-07-22T04:00:00.000Z'))).toBe('2026-07-22T12:00:00.000+08:00');
   });
 });

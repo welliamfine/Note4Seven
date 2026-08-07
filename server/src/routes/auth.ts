@@ -38,11 +38,11 @@ export function authRoutes(pool: Pool, config: AppConfig, storage: StorageServic
 
     const [result] = await pool.execute<ResultSetHeader>(
       `INSERT INTO user_account (open_id, union_id, nickname, last_login_at)
-       VALUES (?, ?, '微信用户', UTC_TIMESTAMP(3))
+       VALUES (?, ?, '微信用户', CURRENT_TIMESTAMP(3))
        ON DUPLICATE KEY UPDATE
          union_id = COALESCE(VALUES(union_id), union_id),
-         last_login_at = UTC_TIMESTAMP(3),
-         updated_at = UTC_TIMESTAMP(3)`,
+         last_login_at = CURRENT_TIMESTAMP(3),
+         updated_at = CURRENT_TIMESTAMP(3)`,
       [openId, unionId],
     );
     const [users] = await pool.execute<UserRow[]>(
@@ -73,7 +73,7 @@ export function authRoutes(pool: Pool, config: AppConfig, storage: StorageServic
 
   router.post('/auth/logout', asyncRoute(async (request, response) => {
     const user = authUser(request);
-    await pool.execute('UPDATE auth_session SET revoked_at = UTC_TIMESTAMP(3) WHERE session_id = ?', [user.sessionId]);
+    await pool.execute('UPDATE auth_session SET revoked_at = CURRENT_TIMESTAMP(3) WHERE session_id = ?', [user.sessionId]);
     ok(response, {});
   }));
 

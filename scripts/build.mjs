@@ -1,4 +1,4 @@
-import { build } from 'esbuild';
+import { build, transform } from 'esbuild';
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { extname, join, relative } from 'node:path';
@@ -72,6 +72,8 @@ async function walk(directory) {
 
 const relativeSource = (file) => relative(sourceDir, file).replace(/\\/g, '/');
 
+const minifyWxml = (source) => source.replace(/>\s+</g, '><').trim();
+
 async function copyAssets() {
   const files = await walk(sourceDir);
   const assets = files.filter((file) => {
@@ -88,7 +90,16 @@ async function copyAssets() {
         : sourcePath;
       const destination = join(outputDir, outputPath);
       await mkdir(join(destination, '..'), { recursive: true });
-      await cp(file, destination);
+      if (targetEnvironment !== 'development' && extname(file) === '.wxml') {
+        const source = await readFile(file, 'utf8');
+        await writeFile(destination, minifyWxml(source));
+      } else if (targetEnvironment !== 'development' && extname(file) === '.wxss') {
+        const source = await readFile(file, 'utf8');
+        const result = await transform(source, { loader: 'css', minify: true, target: 'es2020' });
+        await writeFile(destination, result.code);
+      } else {
+        await cp(file, destination);
+      }
     }),
   );
 }
@@ -126,6 +137,7 @@ const sharedOptions = {
   target: 'es2020',
   sourcemap: apiMode !== 'remote',
   minifyWhitespace: targetEnvironment !== 'development',
+  minifySyntax: targetEnvironment !== 'development',
   logLevel: 'info',
   define: {
     __API_MODE__: JSON.stringify(apiMode),

@@ -133,13 +133,15 @@ const connection = await mysql.createConnection({
   user: process.env.MYSQL_USERNAME,
   password: process.env.MYSQL_PASSWORD,
   database: process.env.MYSQL_DATABASE ?? 'record_life',
+  timezone: '+08:00',
 });
+await connection.query("SET time_zone = '+08:00'");
 const [ownerRows] = await connection.execute('SELECT user_id FROM user_account WHERE open_id = ? LIMIT 1', [ownerSession.openId]);
 const ownerUserId = String(ownerRows[0].user_id);
 await connection.execute(
   `UPDATE account_deletion_request adr
     JOIN user_account u ON u.user_id = adr.user_id
-       SET adr.execute_after = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 SECOND)
+       SET adr.execute_after = DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL 1 SECOND)
      WHERE u.open_id = ? AND adr.status = 'cooling_off'`,
   [ownerSession.openId],
 );

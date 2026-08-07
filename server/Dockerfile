@@ -10,7 +10,8 @@ RUN npm run build \
     && npm cache clean --force
 
 FROM node:22.23.1-bookworm-slim AS runtime
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    TZ=Asia/Shanghai
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

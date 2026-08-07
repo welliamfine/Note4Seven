@@ -39,7 +39,7 @@
 - [ ] `ARC-003` 解决文档中的架构冲突：业务事实库采用 MySQL 8/PostgreSQL 15，不把缺少行锁、唯一约束或事务证明的文档型云数据库作为唯一事实源。服务可部署在微信云托管/云函数，但必须连接关系型主库。
 - [ ] `ARC-004` 定版私有对象存储、短期签名 URL、CDN、Redis（可首版按需启用）、任务队列/可靠任务表和 Outbox Worker。
 - [ ] `ARC-005` 定义 dev/staging/prod 三套环境、密钥管理、数据库迁移、回滚、备份和告警策略。
-- [ ] `ARC-006` 全链路统一：数据库存 UTC，业务日期由服务端按 `Asia/Shanghai` 计算，客户端不得决定 `recordDate`。
+- [x] `ARC-006` 全链路统一：数据库、服务端和接口时间统一为 `Asia/Shanghai`（`+08:00`），业务日期由服务端计算，客户端不得决定 `recordDate`。
 - [ ] `ARC-007` 定义 ID（ULID/UUIDv7/雪花 ID）、`clientRequestId`、游标分页、错误码和 `availableActions` 返回规范。
 
 ### M0-3 高风险 PoC（前后端，5-7 人日）

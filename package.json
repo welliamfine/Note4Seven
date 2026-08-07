@@ -28,6 +28,7 @@
     "release:build": "node scripts/release.mjs",
     "cloud:check-drift": "node scripts/check-cloud-drift.mjs",
     "capacity:model": "node scripts/capacity-model.mjs",
+    "collage:prepare-board": "node scripts/prepare-memory-collage-board.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build:production && node scripts/validate-project.mjs && node scripts/validate-production.mjs",
     "verify:production": "npm run typecheck && npm run test && npm run build:production && node scripts/validate-project.mjs && node scripts/validate-production.mjs"
   },

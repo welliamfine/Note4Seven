@@ -6,19 +6,38 @@ import {
   getCurrentUser,
   getCalendar,
   getHomeModules,
-  getMemoryView,
   getProfileOverview,
   getTemplates,
   PROFILE_NICKNAME_MAX_LENGTH,
   setModulePinned,
   updateCurrentUserProfile,
+  type MemoryCollageItem,
   type MemoryModuleOption,
+  type MemoryReportMode,
+  type MemoryView,
 } from '../../services/api';
 import { track } from '../../services/tracker';
-import { monthLabel, monthOf, nextMonth, previousMonth, shanghaiDate } from '../../utils/date';
+import {
+  monthLabel,
+  monthOf,
+  nextMonth,
+  nextWeek,
+  previousMonth,
+  previousWeek,
+  shanghaiDate,
+  weekRangeLabel,
+  weekStartOf,
+} from '../../utils/date';
 import { createId } from '../../utils/id';
+import {
+  buildMemoryPresentation,
+  type MemoryCalendarCellPresentation,
+  type MemoryMetricPresentation,
+  type MemoryWeekCellPresentation,
+} from '../../utils/memory-presentation';
 import { waitForSheetMotion } from '../../utils/sheet-motion';
 import { createStickerDelays, STICKER_MOTION, waitForAppRouteDone } from '../../utils/sticker-motion';
+import { memoryCollageBoardBackgroundStyle, memoryCollageItemStyle } from '../../utils/memory-collage';
 import { drawStickerWithOutline } from '../../utils/sticker-outline';
 import { hasOpenBottomSheet } from '../../utils/tab-bar-visibility';
 import { confirmDelete, isSharedModuleCreator, removeModuleWithConfirmation } from '../../utils/module-removal';
@@ -30,6 +49,20 @@ import {
 import { createHomeModuleLayoutPlan, HOME_PIN_MOTION } from '../../utils/home-pin-motion';
 import { preloadImageSources } from '../../utils/image-preload';
 import { mergeMemberSnapshot } from '../../utils/member-sync';
+import {
+  fetchMemoryView,
+  memoryViewImageSources,
+  type MemoryViewQuery,
+} from '../../utils/memory-view-cache';
+import {
+  advanceMemoryTextClass,
+  changedMemoryTextClass,
+  memoryReportMotionState,
+  prewarmMemoryReport,
+  runMemoryCollageActionTransition,
+  runMemoryReportTransition,
+  swapMemoryTextClass,
+} from '../../utils/memory-report-transition';
 import {
   applyHomePreviewUpdates,
   consumeHomePreviewUpdates,
@@ -50,8 +83,19 @@ interface ChooseAvatarEvent extends WechatMiniprogram.CustomEvent {
 
 interface AnimatedSticker {
   id: string;
+  moduleId: string;
+  recordDate: string;
   path: string;
   popDelay: number;
+  positionClass: string;
+}
+
+interface FilterModuleOption extends MemoryModuleOption {
+  selected: boolean;
+}
+
+interface SavedCollagePreviewItem extends MemoryCollageItem {
+  style: string;
 }
 
 interface SelectableHomeModuleView extends HomeModuleView {
@@ -74,7 +118,11 @@ let homeShowToken = 0;
 let homeModuleMotionToken = 0;
 let memoryGroupChangeToken = 0;
 let memoryLoadToken = 0;
+let memoryReportTransitionToken = 0;
 let homeHasLoadedOnce = false;
+let memoryHasLoadedOnce = false;
+let memoryEntrySettled = false;
+let memoryEntryLoadPromise: Promise<boolean> | undefined;
 let homePreviewSyncTimer: ReturnType<typeof setInterval> | undefined;
 let homePreviewSyncInFlight = false;
 let homePageVisible = false;
@@ -82,6 +130,7 @@ let homePreviewSyncGeneration = 0;
 let freshHomeStickerTimers: Array<ReturnType<typeof setTimeout>> = [];
 
 const HOME_PREVIEW_SYNC_INTERVAL = 5_000;
+const MEMORY_COLLAGE_BACKGROUND = '/assets/ui/memory-collage-board.webp';
 
 const clearPrimaryStickerTimers = () => {
   primaryStickerTimers.forEach((timer) => clearTimeout(timer));
@@ -98,6 +147,29 @@ const schedulePrimaryStickerState = (callback: () => void, delay: number) => {
 };
 
 const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const memoryToday = () => shanghaiDate();
+
+const memoryPeriodLabel = (mode: MemoryReportMode, period: string): string => (
+  mode === 'month' ? monthLabel(period) : weekRangeLabel(period)
+);
+
+const shiftMemoryPeriod = (mode: MemoryReportMode, period: string, direction: -1 | 1): string => {
+  if (mode === 'month') return direction < 0 ? previousMonth(period) : nextMonth(period);
+  return direction < 0 ? previousWeek(period) : nextWeek(period);
+};
+
+const isFutureMemoryPeriod = (mode: MemoryReportMode, period: string): boolean => {
+  const current = mode === 'month' ? monthOf(memoryToday()) : weekStartOf(memoryToday());
+  return period > current;
+};
+
+const memoryCanvasImagePath = (source: string): Promise<string> => new Promise((resolve) => {
+  wx.getImageInfo({
+    src: source,
+    success: ({ path }) => resolve(path),
+    fail: () => resolve(source),
+  });
+});
 
 const sortHomeModules = (modules: HomeModuleView[]): HomeModuleView[] => [...modules].sort((left, right) => {
   const leftActivity = left.lastActivityAt ?? left.updatedAt;
@@ -168,6 +240,8 @@ Page({
     templates: [] as ModuleTemplate[],
     createOpen: false,
     createClosing: false,
+    recordPolicyHelpOpen: false,
+    recordPolicyHelpClosing: false,
     createSource: 'floating',
     createName: '',
     createDescription: '',
@@ -175,25 +249,56 @@ Page({
     createRecordPolicy: '' as '' | RecordPolicy,
     createSubmitting: false,
     createError: '',
-    memoryMonthLabel: '',
-    memoryRecordedDays: 0,
-    memoryModuleCount: 0,
-    memoryRecordCount: 0,
-    memoryJointCompleted: 0,
-    memoryWeeklyJointCompleted: 0,
-    memoryStreakDays: 0,
-    memoryReceivedReactions: 0,
-    memoryWeeklyReceivedReactions: 0,
-    memoryStickers: [] as AnimatedSticker[],
-    memoryStickerFinalDelay: 0,
-    memoryChangingGroup: false,
+    memoryReportMode: 'month' as MemoryReportMode,
+    memoryReportTabMode: 'month' as MemoryReportMode,
+    memoryPeriodKey: monthOf(memoryToday()),
+    memorySelectedMonth: monthOf(memoryToday()),
+    memorySelectedWeek: weekStartOf(memoryToday()),
+    memoryPeriodLabel: monthLabel(monthOf(memoryToday())),
+    memoryStatusLabel: '进行中',
+    memoryScopeLabel: '全部模块',
     memorySelectedModuleId: '',
     memorySelectedModuleName: '',
-    memoryMonth: monthOf(shanghaiDate()),
     memoryModules: [] as MemoryModuleOption[],
-    memoryMostUsedEmoji: '—',
+    memoryFilterModules: [] as FilterModuleOption[],
+    memoryMomentCount: 0,
+    memoryRecordedDays: 0,
+    memoryReportActionLabel: '查看完整月报',
+    memorySummaryTitle: '',
+    memoryLatestStickerPath: '',
+    memoryHasData: false,
+    memoryHasPartnerModules: false,
+    memoryMetrics: [] as MemoryMetricPresentation[],
+    memoryCalendarCells: [] as MemoryCalendarCellPresentation[],
+    memoryWeekCells: [] as MemoryWeekCellPresentation[],
+    memoryActivitySummary: '',
+    memoryTimeSummary: '',
+    memoryStickers: [] as AnimatedSticker[],
+    memoryHasSavedCollage: false,
+    memoryCollageActionPhase: 'action-visible',
+    memorySavedCollageBoardPath: '',
+    memoryCollageBoardBackgroundStyle: memoryCollageBoardBackgroundStyle(),
+    memorySavedCollageItems: [] as SavedCollagePreviewItem[],
+    memoryStickerFinalDelay: 0,
+    memorySummaryStickerPhase: 'sticker-hidden',
+    memorySummaryMetaMotionClass: 'memory-text-visible',
+    memorySummaryPeriodMotionClass: 'memory-text-visible',
+    memorySummaryCountMotionClass: 'memory-text-visible',
+    memorySummaryActionMotionClass: 'memory-text-visible',
+    memoryMetricValueMotionClasses: ['memory-text-visible', 'memory-text-visible', 'memory-text-visible'],
+    memoryBoardPhase: 'memory-surface-visible',
+    memoryHeatmapPhase: 'memory-surface-visible',
+    memoryReportTransitioning: false,
+    memoryChangingGroup: false,
+    memoryCanGoNext: false,
+    memoryLoading: true,
+    memoryErrorMessage: '',
     memorySelectionOpen: false,
     memorySelectionClosing: false,
+    memoryDraftModuleId: '',
+    memoryDraftPeriodKey: monthOf(memoryToday()),
+    memoryDraftPeriodLabel: monthLabel(monthOf(memoryToday())),
+    memoryDraftCanGoNext: false,
     memoryExporting: false,
     profileUser: null as User | null,
     profileRecordedDays: 0,
@@ -208,12 +313,20 @@ Page({
 
   onLoad() {
     homeHasLoadedOnce = false;
+    memoryHasLoadedOnce = false;
+    memoryEntrySettled = false;
+    memoryEntryLoadPromise = undefined;
     this.setData({ statusBarHeight: wx.getWindowInfo?.().statusBarHeight ?? 24 });
     void this.loadTemplates();
   },
 
   onShow() {
     homePageVisible = true;
+    const collageSaved = Boolean(wx.getStorageSync?.('notemylife.memory.collage.saved'));
+    if (collageSaved) {
+      wx.removeStorageSync?.('notemylife.memory.collage.saved');
+      memoryHasLoadedOnce = false;
+    }
     const showToken = ++homeShowToken;
     const routeReady = waitForAppRouteDone();
     clearPrimaryStickerTimers();
@@ -229,10 +342,17 @@ Page({
         this.playHomeStickerAnimation();
         this.startHomePreviewSync(true);
       });
+      void this.refreshMemoryDataInBackground();
     } else if (this.data.primaryTabIndex === 1) {
-      this.setData({ memoryStickerPhase: 'sticker-hidden' });
-      void Promise.all([this.loadMemoryData(), routeReady]).then(() => {
-        if (showToken === homeShowToken && this.data.primaryTabIndex === 1) this.playMemoryStickerAnimation();
+      memoryEntrySettled = false;
+      this.setData({ memoryStickerPhase: 'sticker-hidden', memorySummaryStickerPhase: 'sticker-hidden' });
+      void routeReady.then(() => {
+        if (showToken !== homeShowToken || this.data.primaryTabIndex !== 1) return;
+        memoryEntrySettled = true;
+        this.tryPlayMemoryEntryAnimation();
+      });
+      void this.ensureMemoryDataLoaded().then((loaded) => {
+        if (loaded) this.tryPlayMemoryEntryAnimation();
       });
     } else if (this.data.primaryTabIndex === 3) {
       void this.loadProfileData();
@@ -247,6 +367,9 @@ Page({
     homeModuleMotionToken += 1;
     memoryGroupChangeToken += 1;
     memoryLoadToken += 1;
+    memoryReportTransitionToken += 1;
+    memoryEntrySettled = false;
+    memoryEntryLoadPromise = undefined;
     clearPrimaryStickerTimers();
     const interruptedHomeMotion = this.data.homeMotionActive
       || this.data.removingModules
@@ -270,6 +393,17 @@ Page({
         normalModules: clearHomeMotionFields(this.data.normalModules),
       } : {}),
       memoryChangingGroup: false,
+      memoryReportTransitioning: false,
+      memoryReportTabMode: this.data.memoryReportMode,
+      memorySummaryMetaMotionClass: 'memory-text-visible',
+      memorySummaryPeriodMotionClass: 'memory-text-visible',
+      memorySummaryCountMotionClass: 'memory-text-visible',
+      memorySummaryActionMotionClass: 'memory-text-visible',
+      memoryMetricValueMotionClasses: ['memory-text-visible', 'memory-text-visible', 'memory-text-visible'],
+      memorySummaryStickerPhase: 'sticker-visible',
+      memoryBoardPhase: 'memory-surface-visible',
+      memoryHeatmapPhase: 'memory-surface-visible',
+      memoryCollageActionPhase: this.data.memoryHasSavedCollage ? 'action-hidden' : 'action-visible',
     });
   },
 
@@ -281,6 +415,9 @@ Page({
     homeModuleMotionToken += 1;
     memoryGroupChangeToken += 1;
     memoryLoadToken += 1;
+    memoryReportTransitionToken += 1;
+    memoryEntrySettled = false;
+    memoryEntryLoadPromise = undefined;
     clearPrimaryStickerTimers();
   },
 
@@ -296,30 +433,69 @@ Page({
   changePrimaryTab(index: number) {
     if (index < 0 || index > 3 || index === this.data.primaryTabIndex) return;
     cardGestureInProgress = false;
+    const leavingMemory = this.data.primaryTabIndex === 1 && index !== 1;
+    if (leavingMemory) memoryReportTransitionToken += 1;
+    if (index === 1) memoryEntrySettled = false;
     this.setData({
       primaryTabIndex: index,
       ...(index === 0 ? { homeStickerPhase: 'sticker-hidden' } : {}),
-      ...(index === 1 ? { memoryStickerPhase: 'sticker-hidden' } : {}),
+      ...(index === 1 ? {
+        memoryStickerPhase: 'sticker-hidden',
+        memorySummaryStickerPhase: 'sticker-hidden',
+      } : {}),
       managing: false,
       selectedModuleIds: [],
       pinPopoverModuleId: '',
       cardGestureActive: false,
+      ...(leavingMemory ? {
+        memoryReportTransitioning: false,
+        memoryReportTabMode: this.data.memoryReportMode,
+        memorySummaryMetaMotionClass: 'memory-text-visible',
+        memorySummaryPeriodMotionClass: 'memory-text-visible',
+        memorySummaryCountMotionClass: 'memory-text-visible',
+        memorySummaryActionMotionClass: 'memory-text-visible',
+        memoryMetricValueMotionClasses: ['memory-text-visible', 'memory-text-visible', 'memory-text-visible'],
+        memorySummaryStickerPhase: 'sticker-visible',
+        memoryBoardPhase: 'memory-surface-visible',
+        memoryHeatmapPhase: 'memory-surface-visible',
+        memoryCollageActionPhase: this.data.memoryHasSavedCollage ? 'action-hidden' : 'action-visible',
+      } : {}),
     }, () => this.syncTabBarVisibility());
   },
 
   onPrimarySwiperChange(event: WechatMiniprogram.CustomEvent<{ current: number }>) {
     const index = event.detail.current;
+    const leavingMemory = this.data.primaryTabIndex === 1 && index !== 1;
+    if (leavingMemory) memoryReportTransitionToken += 1;
     this.setData({
       primaryTabIndex: index,
       managing: false,
       selectedModuleIds: [],
       pinPopoverModuleId: '',
       cardGestureActive: false,
+      ...(leavingMemory ? {
+        memoryReportTransitioning: false,
+        memoryReportTabMode: this.data.memoryReportMode,
+        memorySummaryMetaMotionClass: 'memory-text-visible',
+        memorySummaryPeriodMotionClass: 'memory-text-visible',
+        memorySummaryCountMotionClass: 'memory-text-visible',
+        memorySummaryActionMotionClass: 'memory-text-visible',
+        memoryMetricValueMotionClasses: ['memory-text-visible', 'memory-text-visible', 'memory-text-visible'],
+        memorySummaryStickerPhase: 'sticker-visible',
+        memoryBoardPhase: 'memory-surface-visible',
+        memoryHeatmapPhase: 'memory-surface-visible',
+        memoryCollageActionPhase: this.data.memoryHasSavedCollage ? 'action-hidden' : 'action-visible',
+      } : {}),
     });
     this.syncTabBarVisibility();
     if (index === 1) {
-      this.loadMemoryData();
-      track('memory_view', { weeklyOverviewReady: true, monthlyCardReady: true });
+      memoryEntrySettled = false;
+      clearPrimaryStickerTimers();
+      this.setData({ memoryStickerPhase: 'sticker-hidden', memorySummaryStickerPhase: 'sticker-hidden' });
+      void this.ensureMemoryDataLoaded().then((loaded) => {
+        if (loaded) this.tryPlayMemoryEntryAnimation();
+      });
+      track('memory_view', { reportMode: this.data.memoryReportMode });
     } else if (index === 2) {
       track('discover_view', { pageVariant: 'coming_soon' });
     } else if (index === 3) {
@@ -332,15 +508,21 @@ Page({
     clearPrimaryStickerTimers();
     this.setData({
       ...(index === 0 ? {} : { homeStickerPhase: 'sticker-hidden' }),
-      ...(index === 1 ? {} : { memoryStickerPhase: 'sticker-hidden' }),
+      ...(index === 1 ? {} : {
+        memoryStickerPhase: 'sticker-hidden',
+        memorySummaryStickerPhase: 'sticker-hidden',
+      }),
     }, () => {
       if (index === 0) {
         this.playHomeStickerAnimation();
         if (homePageVisible) this.startHomePreviewSync(true);
+      } else if (index === 1) {
+        memoryEntrySettled = true;
+        this.tryPlayMemoryEntryAnimation();
+        this.stopHomePreviewSync();
       } else {
         this.stopHomePreviewSync();
       }
-      if (index === 1) this.playMemoryStickerAnimation();
     });
   },
 
@@ -357,94 +539,345 @@ Page({
   },
 
   playMemoryStickerAnimation() {
-    this.setData({ memoryStickerPhase: 'sticker-hidden' });
+    this.setData({ memoryStickerPhase: 'sticker-hidden', memorySummaryStickerPhase: 'sticker-hidden' });
     schedulePrimaryStickerState(
-      () => this.setData({ memoryStickerPhase: 'sticker-entering' }),
+      () => this.setData({
+        memoryStickerPhase: 'sticker-entering',
+        memorySummaryStickerPhase: 'sticker-entering',
+      }),
       STICKER_MOTION.pageSettledDelay,
     );
     schedulePrimaryStickerState(
-      () => this.setData({ memoryStickerPhase: 'sticker-visible' }),
+      () => this.setData({
+        memoryStickerPhase: 'sticker-visible',
+        memorySummaryStickerPhase: 'sticker-visible',
+      }),
       STICKER_MOTION.pageSettledDelay + this.data.memoryStickerFinalDelay + STICKER_MOTION.duration,
     );
   },
 
+  tryPlayMemoryEntryAnimation() {
+    if (!homePageVisible
+      || this.data.primaryTabIndex !== 1
+      || !memoryEntrySettled
+      || !memoryHasLoadedOnce
+      || memoryEntryLoadPromise) return;
+    clearPrimaryStickerTimers();
+    this.playMemoryStickerAnimation();
+  },
+
+  ensureMemoryDataLoaded(): Promise<boolean> {
+    if (memoryEntryLoadPromise) return memoryEntryLoadPromise;
+    if (memoryHasLoadedOnce) return Promise.resolve(true);
+    const promise = this.loadMemoryData(
+      false,
+      Promise.resolve(),
+      false,
+      (items) => preloadImageSources(items.map((item) => item.stickerPath)),
+    ).finally(() => {
+      if (memoryEntryLoadPromise === promise) memoryEntryLoadPromise = undefined;
+    });
+    memoryEntryLoadPromise = promise;
+    return promise;
+  },
+
+  refreshMemoryDataInBackground() {
+    if (!memoryHasLoadedOnce || memoryEntryLoadPromise) return;
+    const promise = this.loadMemoryData(
+      false,
+      Promise.resolve(),
+      false,
+      (items) => preloadImageSources(items.map((item) => item.stickerPath)),
+      true,
+    ).then((loaded) => loaded || memoryHasLoadedOnce).finally(() => {
+      if (memoryEntryLoadPromise === promise) memoryEntryLoadPromise = undefined;
+    });
+    memoryEntryLoadPromise = promise;
+  },
+
   async loadMemoryData(
     forceChange = false,
-    animate = forceChange,
     beforeApply: Promise<void> = Promise.resolve(),
     preserveOnFailure = false,
     prepareItems?: (items: Array<{ stickerPath: string }>) => Promise<void>,
+    background = false,
+    viewOverride?: MemoryView,
+    transitionApply = false,
   ): Promise<boolean> {
     const loadToken = ++memoryLoadToken;
+    if (!preserveOnFailure && !background) this.setData({ memoryLoading: true, memoryErrorMessage: '' });
     try {
-      const view = await getMemoryView(this.data.memorySelectedModuleId || undefined, this.data.memoryMonth, forceChange);
+      const view = viewOverride ?? await fetchMemoryView({
+        moduleId: this.data.memorySelectedModuleId || undefined,
+        periodKey: this.data.memoryPeriodKey,
+        forceChange,
+        reportMode: this.data.memoryReportMode,
+        allModules: !this.data.memorySelectedModuleId,
+      });
+      if (!forceChange && !background && !transitionApply) {
+        this.prewarmAlternateMemoryReport(view.reportMode);
+      }
+      if (!transitionApply) await preloadImageSources(memoryViewImageSources(view));
       await prepareItems?.(view.items);
       await beforeApply;
       if (loadToken !== memoryLoadToken) return false;
+      const presentation = buildMemoryPresentation(view, memoryToday());
       const stickerPlan = createStickerDelays(view.items.map((item) => item.recordId));
+      const memoryFilterModules = [
+        { moduleId: '', name: '全部模块' },
+        ...view.modules,
+      ].map((module) => ({ ...module, selected: module.moduleId === view.moduleId }));
       await new Promise<void>((resolve) => this.setData({
-          memoryMonthLabel: monthLabel(view.month),
-          memoryRecordedDays: view.recordedDays,
-          memoryModuleCount: view.participatedModuleCount,
-          memoryRecordCount: view.weeklyRecordCount,
-          memoryJointCompleted: view.monthlyJointCompletedDays,
-          memoryWeeklyJointCompleted: view.jointCompletedDays,
-          memoryStreakDays: view.currentStreakDays,
-          memoryReceivedReactions: view.monthlyReceivedReactionCount,
-          memoryWeeklyReceivedReactions: view.receivedReactionCount,
+          memoryReportMode: view.reportMode,
+          memoryReportTabMode: view.reportMode,
+          memoryPeriodKey: view.periodKey,
+          ...(view.reportMode === 'month'
+            ? { memorySelectedMonth: view.periodKey }
+            : { memorySelectedWeek: view.periodKey }),
+          memoryPeriodLabel: presentation.periodLabel,
+          memoryStatusLabel: presentation.statusLabel,
+          memoryScopeLabel: presentation.scopeLabel,
           memorySelectedModuleId: view.moduleId,
           memorySelectedModuleName: view.moduleName,
-          memoryMonth: view.month,
           memoryModules: view.modules,
-          memoryMostUsedEmoji: view.mostUsedEmoji,
-          memoryStickers: view.items.map((item) => ({
+          memoryFilterModules,
+          memoryMomentCount: view.momentCount,
+          memoryRecordedDays: view.recordedDays,
+          memoryReportActionLabel: presentation.reportActionLabel,
+          memorySummaryTitle: presentation.summaryTitle,
+          memoryLatestStickerPath: presentation.latestStickerPath,
+          memoryHasData: presentation.hasData,
+          memoryHasPartnerModules: view.hasPartnerModules,
+          memoryMetrics: presentation.metrics,
+          memoryCalendarCells: presentation.calendarCells,
+          memoryWeekCells: presentation.weekCells,
+          memoryActivitySummary: presentation.activitySummary,
+          memoryTimeSummary: presentation.timeSummary,
+          memoryStickers: view.items.map((item, index) => ({
             id: item.recordId,
+            moduleId: item.moduleId,
+            recordDate: item.recordDate,
             path: item.stickerPath,
             popDelay: stickerPlan.delays.get(item.recordId) ?? 0,
+            positionClass: `collage-sticker-${index}`,
+          })),
+          memoryHasSavedCollage: Boolean(view.collage),
+          memoryCollageActionPhase: transitionApply || background
+            ? this.data.memoryCollageActionPhase
+            : (view.collage ? 'action-hidden' : 'action-visible'),
+          memorySavedCollageBoardPath: view.collage?.board?.imagePath ?? '',
+          memorySavedCollageItems: (view.collage?.items ?? []).map((item) => ({
+            ...item,
+            style: memoryCollageItemStyle(item),
           })),
           memoryStickerFinalDelay: stickerPlan.finalDelay,
-          memoryStickerPhase: animate ? 'sticker-hidden' : this.data.memoryStickerPhase,
-        }, () => {
-          if (animate) this.playMemoryStickerAnimation();
-          resolve();
-        }));
+          memoryStickerPhase: transitionApply
+            ? 'sticker-visible'
+            : (background ? this.data.memoryStickerPhase : 'sticker-hidden'),
+          memorySummaryStickerPhase: transitionApply
+            ? 'sticker-hidden'
+            : (background ? this.data.memorySummaryStickerPhase : 'sticker-hidden'),
+          memorySummaryMetaMotionClass: transitionApply
+            ? swapMemoryTextClass(this.data.memorySummaryMetaMotionClass)
+            : 'memory-text-visible',
+          memorySummaryPeriodMotionClass: transitionApply
+            ? swapMemoryTextClass(this.data.memorySummaryPeriodMotionClass)
+            : 'memory-text-visible',
+          memorySummaryCountMotionClass: transitionApply
+            ? swapMemoryTextClass(this.data.memorySummaryCountMotionClass)
+            : 'memory-text-visible',
+          memorySummaryActionMotionClass: transitionApply
+            ? swapMemoryTextClass(this.data.memorySummaryActionMotionClass)
+            : 'memory-text-visible',
+          memoryMetricValueMotionClasses: transitionApply
+            ? this.data.memoryMetricValueMotionClasses.map(swapMemoryTextClass)
+            : presentation.metrics.map(() => 'memory-text-visible'),
+          memoryBoardPhase: transitionApply
+            ? 'memory-surface-hidden'
+            : (background ? this.data.memoryBoardPhase : 'memory-surface-visible'),
+          memoryHeatmapPhase: transitionApply
+            ? 'memory-surface-hidden'
+            : (background ? this.data.memoryHeatmapPhase : 'memory-surface-visible'),
+          memoryCanGoNext: !view.isCurrentPeriod,
+          memoryLoading: false,
+          memoryErrorMessage: '',
+        }, resolve));
+      memoryHasLoadedOnce = true;
       return true;
     } catch {
       await beforeApply;
       if (loadToken !== memoryLoadToken) return false;
+      if (background) return false;
       if (preserveOnFailure) {
-        this.setData({ memoryStickerPhase: 'sticker-visible' });
+        this.setData({
+          memoryStickerPhase: 'sticker-visible',
+          memorySummaryStickerPhase: 'sticker-visible',
+          memoryChangingGroup: false,
+        });
+        wx.showToast({ title: '暂时无法更换，请稍后重试', icon: 'none' });
         return false;
       }
-      this.setData({ memoryStickers: [], memorySelectedModuleId: '', memorySelectedModuleName: '' });
+      this.setData({ memoryLoading: false, memoryErrorMessage: '回忆暂时没有加载出来' });
       return false;
     }
   },
 
+  memoryViewQuery(
+    reportMode?: MemoryReportMode,
+    periodKey?: string,
+  ): MemoryViewQuery {
+    return {
+      moduleId: this.data.memorySelectedModuleId || undefined,
+      periodKey: periodKey ?? this.data.memoryPeriodKey,
+      reportMode: reportMode ?? this.data.memoryReportMode,
+      allModules: !this.data.memorySelectedModuleId,
+    };
+  },
+
+  prewarmAlternateMemoryReport(sourceMode?: MemoryReportMode) {
+    const activeMode = sourceMode ?? this.data.memoryReportMode;
+    const reportMode: MemoryReportMode = activeMode === 'month' ? 'week' : 'month';
+    const periodKey = reportMode === 'month' ? this.data.memorySelectedMonth : this.data.memorySelectedWeek;
+    prewarmMemoryReport(
+      this.memoryViewQuery(reportMode, periodKey),
+      (view) => preloadImageSources(memoryViewImageSources(view)),
+    );
+  },
+
+  setMemoryReportMode(event: WechatMiniprogram.TouchEvent) {
+    const mode = event.currentTarget.dataset.mode as MemoryReportMode;
+    void this.transitionMemoryReportMode(mode);
+  },
+
+  async transitionMemoryReportMode(mode: MemoryReportMode) {
+    if (mode === this.data.memoryReportMode || this.data.memoryReportTransitioning) return;
+    const token = ++memoryReportTransitionToken;
+    const previousMode = this.data.memoryReportMode;
+    const periodKey = mode === 'month' ? this.data.memorySelectedMonth : this.data.memorySelectedWeek;
+    const query = this.memoryViewQuery(mode, periodKey);
+    clearPrimaryStickerTimers();
+    await runMemoryReportTransition(query, {
+      isActive: () => token === memoryReportTransitionToken,
+      preload: (view) => preloadImageSources(memoryViewImageSources(view)),
+      prepareView: (view) => runMemoryCollageActionTransition(
+        !this.data.memoryHasSavedCollage,
+        !view.collage,
+        () => token === memoryReportTransitionToken,
+        (memoryCollageActionPhase) => this.setData({ memoryCollageActionPhase }),
+      ),
+      applyView: (view, background, transitionApply) => this.loadMemoryData(
+        false,
+        Promise.resolve(),
+        true,
+        undefined,
+        background,
+        view,
+        transitionApply,
+      ),
+      onStart: (cacheHit) => {
+        this.setData({ memoryReportTabMode: mode, memoryReportTransitioning: true });
+        track('memory_report_mode_change', { mode, cacheHit });
+      },
+      onReady: (view) => {
+        const presentation = buildMemoryPresentation(view, memoryToday());
+        this.setData({
+          memoryStickerPhase: 'sticker-visible',
+          memorySummaryMetaMotionClass: changedMemoryTextClass(
+            presentation.periodLabel !== this.data.memoryPeriodLabel
+              || presentation.statusLabel !== this.data.memoryStatusLabel,
+          ),
+          memorySummaryPeriodMotionClass: changedMemoryTextClass(
+            view.reportMode !== this.data.memoryReportMode,
+          ),
+          memorySummaryCountMotionClass: changedMemoryTextClass(
+            view.momentCount !== this.data.memoryMomentCount,
+          ),
+          memorySummaryActionMotionClass: changedMemoryTextClass(
+            presentation.reportActionLabel !== this.data.memoryReportActionLabel,
+          ),
+          memoryMetricValueMotionClasses: presentation.metrics.map((metric, index) => changedMemoryTextClass(
+            metric.value !== this.data.memoryMetrics[index]?.value,
+          )),
+        });
+      },
+      onPhase: (phase) => {
+        const state = memoryReportMotionState(phase, mode, previousMode);
+        this.setData({
+          ...(state.tabMode ? { memoryReportTabMode: state.tabMode } : {}),
+          ...(state.transitioning === undefined ? {} : { memoryReportTransitioning: state.transitioning }),
+          memoryBoardPhase: state.boardPhase,
+          memoryHeatmapPhase: state.heatmapPhase,
+          memorySummaryStickerPhase: state.summaryStickerPhase,
+          memorySummaryMetaMotionClass: advanceMemoryTextClass(this.data.memorySummaryMetaMotionClass, phase),
+          memorySummaryPeriodMotionClass: advanceMemoryTextClass(this.data.memorySummaryPeriodMotionClass, phase),
+          memorySummaryCountMotionClass: advanceMemoryTextClass(this.data.memorySummaryCountMotionClass, phase),
+          memorySummaryActionMotionClass: advanceMemoryTextClass(this.data.memorySummaryActionMotionClass, phase),
+          memoryMetricValueMotionClasses: this.data.memoryMetricValueMotionClasses
+            .map((item) => advanceMemoryTextClass(item, phase)),
+        });
+      },
+      onError: () => {
+        this.setData({
+          memoryCollageActionPhase: this.data.memoryHasSavedCollage ? 'action-hidden' : 'action-visible',
+        });
+        wx.showToast({ title: '回忆暂时没有加载出来', icon: 'none' });
+      },
+    });
+  },
+
+  previousMemoryPeriod() {
+    this.navigateMemoryPeriod(-1);
+  },
+
+  nextMemoryPeriod() {
+    if (!this.data.memoryCanGoNext) return;
+    this.navigateMemoryPeriod(1);
+  },
+
+  navigateMemoryPeriod(direction: -1 | 1) {
+    const target = shiftMemoryPeriod(this.data.memoryReportMode, this.data.memoryPeriodKey, direction);
+    if (isFutureMemoryPeriod(this.data.memoryReportMode, target)) return;
+    clearPrimaryStickerTimers();
+    this.setData({
+      memoryPeriodKey: target,
+      ...(this.data.memoryReportMode === 'month'
+        ? { memorySelectedMonth: target }
+        : { memorySelectedWeek: target }),
+      memoryStickerPhase: 'sticker-hidden',
+      memorySummaryStickerPhase: 'sticker-hidden',
+    }, () => {
+      track('memory_period_change', {
+        mode: this.data.memoryReportMode,
+        direction,
+        period: target,
+      });
+      void this.loadMemoryData().then((loaded) => { if (loaded) this.playMemoryStickerAnimation(); });
+    });
+  },
+
   async changeMemoryGroup() {
-    if (this.data.memoryChangingGroup) return;
+    if (this.data.memoryChangingGroup || !this.data.memoryStickers.length) return;
     const token = ++memoryGroupChangeToken;
     clearPrimaryStickerTimers();
     this.setData({ memoryChangingGroup: true });
-    track('memory_change_group_click', { moduleId: this.data.memorySelectedModuleId, month: this.data.memoryMonth });
+    track('memory_change_group_click', {
+      moduleId: this.data.memorySelectedModuleId || 'all',
+      mode: this.data.memoryReportMode,
+      period: this.data.memoryPeriodKey,
+    });
     const loaded = await this.loadMemoryData(
-      true,
       true,
       Promise.resolve(),
       true,
       async (items) => {
-        await preloadImageSources(items.map((item) => item.stickerPath));
         if (token !== memoryGroupChangeToken) return;
-        if (!this.data.memoryStickers.length) {
-          this.setData({ memoryStickerPhase: 'sticker-hidden' });
-          return;
-        }
         this.setData({ memoryStickerPhase: 'sticker-leaving' });
         await wait(STICKER_MOTION.oldPageFadeDuration);
       },
     );
     if (token !== memoryGroupChangeToken) return;
     if (loaded) {
+      this.playMemoryStickerAnimation();
       await wait(STICKER_MOTION.pageSettledDelay + this.data.memoryStickerFinalDelay + STICKER_MOTION.duration);
       if (token !== memoryGroupChangeToken) return;
     }
@@ -452,8 +885,24 @@ Page({
   },
 
   openMemorySelection() {
-    this.setData({ memorySelectionOpen: true, memorySelectionClosing: false }, () => this.syncTabBarVisibility());
+    const memoryDraftPeriodKey = this.data.memoryPeriodKey;
+    this.setData({
+      memorySelectionOpen: true,
+      memorySelectionClosing: false,
+      memoryDraftModuleId: this.data.memorySelectedModuleId,
+      memoryDraftPeriodKey,
+      memoryDraftPeriodLabel: memoryPeriodLabel(this.data.memoryReportMode, memoryDraftPeriodKey),
+      memoryDraftCanGoNext: !isFutureMemoryPeriod(
+        this.data.memoryReportMode,
+        shiftMemoryPeriod(this.data.memoryReportMode, memoryDraftPeriodKey, 1),
+      ),
+      memoryFilterModules: this.data.memoryFilterModules.map((module) => ({
+        ...module,
+        selected: module.moduleId === this.data.memorySelectedModuleId,
+      })),
+    }, () => this.syncTabBarVisibility());
   },
+
   async dismissMemorySelection() {
     if (!this.data.memorySelectionOpen || this.data.memorySelectionClosing) return;
     this.setData({ memorySelectionClosing: true });
@@ -462,69 +911,171 @@ Page({
     this.setData({ memorySelectionOpen: false, memorySelectionClosing: false });
     this.syncTabBarVisibility();
   },
+
   closeMemorySelection() { void this.dismissMemorySelection(); },
-  async selectMemoryModule(event: WechatMiniprogram.TouchEvent) {
-    const moduleId = event.currentTarget.dataset.id as string;
-    clearPrimaryStickerTimers();
-    this.setData({ memorySelectedModuleId: moduleId, memoryStickerPhase: 'sticker-hidden' });
-    await Promise.all([this.dismissMemorySelection(), this.loadMemoryData(false)]);
-    this.playMemoryStickerAnimation();
-  },
-  previousMemoryMonth() {
-    clearPrimaryStickerTimers();
-    this.setData({ memoryMonth: previousMonth(this.data.memoryMonth), memoryStickerPhase: 'sticker-hidden' }, () => void this.loadMemoryData(false, true));
-  },
-  nextMemoryMonth() {
-    const target = nextMonth(this.data.memoryMonth);
-    if (target > monthOf(shanghaiDate())) return;
-    clearPrimaryStickerTimers();
-    this.setData({ memoryMonth: target, memoryStickerPhase: 'sticker-hidden' }, () => void this.loadMemoryData(false, true));
+
+  previousMemoryDraftPeriod() {
+    this.changeMemoryDraftPeriod(-1);
   },
 
-  saveMemoryCard() {
-    if (this.data.memoryExporting || !this.data.memorySelectedModuleId) return;
+  nextMemoryDraftPeriod() {
+    if (!this.data.memoryDraftCanGoNext) return;
+    this.changeMemoryDraftPeriod(1);
+  },
+
+  changeMemoryDraftPeriod(direction: -1 | 1) {
+    const target = shiftMemoryPeriod(this.data.memoryReportMode, this.data.memoryDraftPeriodKey, direction);
+    if (isFutureMemoryPeriod(this.data.memoryReportMode, target)) return;
+    this.setData({
+      memoryDraftPeriodKey: target,
+      memoryDraftPeriodLabel: memoryPeriodLabel(this.data.memoryReportMode, target),
+      memoryDraftCanGoNext: !isFutureMemoryPeriod(
+        this.data.memoryReportMode,
+        shiftMemoryPeriod(this.data.memoryReportMode, target, 1),
+      ),
+    });
+  },
+
+  selectMemoryDraftModule(event: WechatMiniprogram.TouchEvent) {
+    const memoryDraftModuleId = String(event.currentTarget.dataset.id ?? '');
+    this.setData({
+      memoryDraftModuleId,
+      memoryFilterModules: this.data.memoryFilterModules.map((module) => ({
+        ...module,
+        selected: module.moduleId === memoryDraftModuleId,
+      })),
+    });
+  },
+
+  async applyMemorySelection() {
+    const moduleId = this.data.memoryDraftModuleId;
+    const periodKey = this.data.memoryDraftPeriodKey;
+    const changed = moduleId !== this.data.memorySelectedModuleId || periodKey !== this.data.memoryPeriodKey;
+    await this.dismissMemorySelection();
+    if (!changed) return;
+    clearPrimaryStickerTimers();
+    this.setData({
+      memorySelectedModuleId: moduleId,
+      memoryPeriodKey: periodKey,
+      ...(this.data.memoryReportMode === 'month'
+        ? { memorySelectedMonth: periodKey }
+        : { memorySelectedWeek: periodKey }),
+      memoryStickerPhase: 'sticker-hidden',
+      memorySummaryStickerPhase: 'sticker-hidden',
+    }, () => {
+      track('memory_filter_apply', {
+        moduleId: moduleId || 'all',
+        mode: this.data.memoryReportMode,
+        period: periodKey,
+      });
+      void this.loadMemoryData().then((loaded) => { if (loaded) this.playMemoryStickerAnimation(); });
+    });
+  },
+
+  retryMemoryLoad() {
+    void this.loadMemoryData().then((loaded) => { if (loaded) this.playMemoryStickerAnimation(); });
+  },
+
+  showFullMemoryReport() {
+    if (!this.data.memoryHasData) return;
+    const metricLines = this.data.memoryMetrics
+      .map((metric) => `${metric.label}：${metric.value}${metric.unit}`)
+      .join('\n');
+    const timeLine = this.data.memoryTimeSummary ? `\n${this.data.memoryTimeSummary}` : '';
+    wx.showModal({
+      title: `${this.data.memoryPeriodLabel}总结`,
+      content: `${this.data.memorySummaryTitle}\n${metricLines}${timeLine}`,
+      showCancel: false,
+      confirmText: '知道了',
+    });
+    track('memory_report_summary_open', {
+      mode: this.data.memoryReportMode,
+      period: this.data.memoryPeriodKey,
+    });
+  },
+
+  async saveMemoryCard() {
+    if (this.data.memoryExporting) return;
+    if (!this.data.memoryStickers.length) {
+      wx.showToast({ title: '暂无可保存的回忆', icon: 'none' });
+      return;
+    }
     this.setData({ memoryExporting: true });
-    wx.showLoading({ title: '正在生成卡片' });
-    const context = wx.createCanvasContext('memoryExportCanvas', this);
-    context.setFillStyle('#f9f8f3');
-    context.fillRect(0, 0, 750, 1000);
-    context.setFillStyle('#c99491');
-    context.setFontSize(36);
-    context.fillText('RECORD', 64, 100);
-    context.setFillStyle('#5f5851');
-    context.setFontSize(32);
-    context.fillText(this.data.memorySelectedModuleName, 64, 154);
-    context.setFillStyle('#9b9188');
-    context.setFontSize(24);
-    context.fillText(this.data.memoryMonthLabel, 64, 194);
-    this.data.memoryStickers.forEach((sticker, index) => {
-      const column = index % 4;
-      const row = Math.floor(index / 4);
-      drawStickerWithOutline(context, sticker.path, 54 + column * 166, 250 + row * 250, 144, 196);
+    wx.showLoading({ title: '正在生成回忆' });
+    try {
+      const paths = await Promise.all([
+        memoryCanvasImagePath(MEMORY_COLLAGE_BACKGROUND),
+        ...this.data.memoryStickers.map((sticker) => memoryCanvasImagePath(sticker.path)),
+      ]);
+      const context = wx.createCanvasContext('memoryExportCanvas', this);
+      context.drawImage(paths[0], 0, 0, 900, 900);
+      context.setFillStyle('#5b524b');
+      context.setTextAlign('center');
+      context.setFontSize(30);
+      context.fillText(`${this.data.memoryPeriodLabel} · ${this.data.memoryScopeLabel}`, 450, 286);
+      paths.slice(1).forEach((path, index) => {
+        const column = index % 4;
+        const row = Math.floor(index / 4);
+        drawStickerWithOutline(context, path, 130 + column * 165, 338 + row * 178, 116, 138);
+      });
+      context.setFillStyle('#6c5140');
+      context.setFontSize(24);
+      context.fillText(
+        `${this.data.memoryMomentCount}个瞬间 · ${this.data.memoryRecordedDays}天有记录`,
+        450,
+        722,
+      );
+      await new Promise<void>((resolve) => context.draw(false, resolve));
+      const tempFilePath = await new Promise<string>((resolve, reject) => {
+        wx.canvasToTempFilePath({
+          canvasId: 'memoryExportCanvas',
+          width: 900,
+          height: 900,
+          destWidth: 1800,
+          destHeight: 1800,
+          success: ({ tempFilePath: path }) => resolve(path),
+          fail: reject,
+        }, this);
+      });
+      await new Promise<void>((resolve, reject) => wx.saveImageToPhotosAlbum({
+        filePath: tempFilePath,
+        success: () => resolve(),
+        fail: reject,
+      }));
+      wx.hideLoading();
+      this.setData({ memoryExporting: false });
+      wx.showToast({ title: '已保存到相册' });
+      track('memory_export_success', {
+        moduleId: this.data.memorySelectedModuleId || 'all',
+        mode: this.data.memoryReportMode,
+        period: this.data.memoryPeriodKey,
+      });
+    } catch {
+      wx.hideLoading();
+      this.setData({ memoryExporting: false });
+      wx.showModal({
+        title: '无法保存到相册',
+        content: '请确认已允许照片权限后重试。',
+        confirmText: '去设置',
+        success: ({ confirm }) => { if (confirm) void wx.openSetting({}); },
+      });
+    }
+  },
+
+  openMemoryCollageEditor() {
+    const query = [
+      `mode=${this.data.memoryReportMode}`,
+      `period=${encodeURIComponent(this.data.memoryPeriodKey)}`,
+      ...(this.data.memorySelectedModuleId
+        ? [`moduleId=${encodeURIComponent(this.data.memorySelectedModuleId)}`]
+        : []),
+    ].join('&');
+    track('memory_collage_edit_click', {
+      moduleId: this.data.memorySelectedModuleId || 'all',
+      mode: this.data.memoryReportMode,
+      period: this.data.memoryPeriodKey,
     });
-    context.setFillStyle('#766e67');
-    context.setFontSize(24);
-    context.fillText(`共同完成 ${this.data.memoryJointCompleted} 天  ·  收到回应 ${this.data.memoryReceivedReactions} 次`, 64, 815);
-    context.setFillStyle('#b9a9a0');
-    context.setFontSize(20);
-    context.fillText('Note4Seven · 七日记', 64, 920);
-    context.draw(false, () => {
-      wx.canvasToTempFilePath({
-        canvasId: 'memoryExportCanvas',
-        width: 750,
-        height: 1000,
-        destWidth: 1500,
-        destHeight: 2000,
-        success: ({ tempFilePath }) => {
-          wx.saveImageToPhotosAlbum({
-            filePath: tempFilePath,
-            success: () => { wx.hideLoading(); this.setData({ memoryExporting: false }); wx.showToast({ title: '已保存到相册' }); track('memory_export_success', { moduleId: this.data.memorySelectedModuleId, month: this.data.memoryMonth }); },
-            fail: () => { wx.hideLoading(); this.setData({ memoryExporting: false }); wx.showModal({ title: '无法保存到相册', content: '请在系统设置中允许照片权限后重试。', confirmText: '去设置', success: ({ confirm }) => { if (confirm) void wx.openSetting({}); } }); },
-          });
-        },
-        fail: () => { wx.hideLoading(); this.setData({ memoryExporting: false }); wx.showToast({ title: '卡片生成失败', icon: 'none' }); },
-      }, this);
-    });
+    void wx.navigateTo({ url: `/subpackages/memory-collage-editor/index?${query}` });
   },
 
   async loadProfileData() {
@@ -872,8 +1423,14 @@ Page({
   openModule(event: WechatMiniprogram.TouchEvent) {
     if (cardTouchMoved) return;
     const moduleId = event.currentTarget.dataset.id as string;
+    const pinned = event.currentTarget.dataset.pinned === true || event.currentTarget.dataset.pinned === 'true';
     if (this.data.managing) {
       this.toggleModuleSelection(moduleId);
+      return;
+    }
+    if ((pinned && !this.data.pinnedExpanded) || (!pinned && !this.data.normalExpanded)) {
+      if (pinned) this.togglePinnedGroup();
+      else this.toggleNormalGroup();
       return;
     }
     if (this.data.pinPopoverModuleId) {
@@ -1163,6 +1720,8 @@ Page({
     this.setData({
       createOpen: true,
       createClosing: false,
+      recordPolicyHelpOpen: false,
+      recordPolicyHelpClosing: false,
       createSource: source,
       createName: '',
       createDescription: '',
@@ -1200,7 +1759,12 @@ Page({
     this.setData({ createClosing: true });
     await waitForSheetMotion();
     if (!this.data.createClosing) return;
-    this.setData({ createOpen: false, createClosing: false });
+    this.setData({
+      createOpen: false,
+      createClosing: false,
+      recordPolicyHelpOpen: false,
+      recordPolicyHelpClosing: false,
+    });
     this.syncTabBarVisibility();
   },
 
@@ -1234,6 +1798,18 @@ Page({
     track('module_create_record_policy_click', { recordPolicy });
   },
 
+  showRecordPolicyHelp() {
+    this.setData({ recordPolicyHelpOpen: true, recordPolicyHelpClosing: false });
+  },
+
+  async hideRecordPolicyHelp() {
+    if (!this.data.recordPolicyHelpOpen || this.data.recordPolicyHelpClosing) return;
+    this.setData({ recordPolicyHelpClosing: true });
+    await waitForSheetMotion();
+    if (!this.data.recordPolicyHelpClosing) return;
+    this.setData({ recordPolicyHelpOpen: false, recordPolicyHelpClosing: false });
+  },
+
   async submitCreate() {
     const name = this.data.createName.trim();
     if (!name) {
@@ -1246,7 +1822,7 @@ Page({
       return;
     }
     if (!this.data.createRecordPolicy) {
-      this.setData({ createError: '请选择记录模式' });
+      this.setData({ createError: '请选择模式' });
       return;
     }
     const token = ++homeModuleMotionToken;

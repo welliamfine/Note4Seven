@@ -3,6 +3,7 @@ import { dirname, extname, resolve, sep } from 'node:path';
 import sharp from 'sharp';
 import type { AppConfig } from '../config';
 import { AppError } from '../lib/errors';
+import { isoWithShanghaiOffset } from '../lib/time';
 import { StorageService, type UploadInstruction } from './storage';
 
 export class LocalStorageService extends StorageService {
@@ -18,7 +19,7 @@ export class LocalStorageService extends StorageService {
     return {
       method: 'LOCAL',
       cloudPath: objectKey,
-      expireAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      expireAt: isoWithShanghaiOffset(new Date(Date.now() + 10 * 60 * 1000)),
     };
   }
 

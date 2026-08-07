@@ -24,6 +24,9 @@ import type {
   PreparedMediaFile,
   ReminderSubscription,
   ReminderSubscriptionStatus,
+  StreakRewardDraw,
+  StreakRewardRule,
+  StreakRewardTargetType,
   User,
 } from '../types/domain';
 import { addDays, buildMonthGrid, differenceInDays, shanghaiDate, shanghaiNowIso } from '../utils/date';
@@ -239,9 +242,7 @@ export async function removeModuleForCurrentUser(moduleId: string): Promise<'del
     if (!currentMember) throw new Error('MODULE_ACCESS_DENIED');
 
     if (members.length === 1) {
-      database.modules.splice(moduleIndex, 1);
-      database.records = database.records.filter((record) => record.moduleId !== moduleId);
-      database.preferences = database.preferences.filter((preference) => preference.moduleId !== moduleId);
+      purgeModuleData(database, moduleId);
       return 'deleted';
     }
 
@@ -250,6 +251,15 @@ export async function removeModuleForCurrentUser(moduleId: string): Promise<'del
     currentMember.active = false;
     currentMember.leftAt = now;
     currentMember.leaveReason = 'self_exit';
+    database.streakRewardRules
+      .filter((rule) => rule.moduleId === moduleId && rule.status === 'active'
+        && (rule.sponsorMemberInstanceId === currentMember.memberInstanceId
+          || rule.targetMemberInstanceId === currentMember.memberInstanceId))
+      .forEach((rule) => {
+        rule.status = 'cancelled';
+        rule.cancelledAt = now;
+        rule.updatedAt = now;
+      });
     database.makeupApprovals
       .filter((approval) => approval.applicantMemberInstanceId === currentMember.memberInstanceId && approval.status === 'pending')
       .forEach((approval) => {
@@ -456,6 +466,8 @@ export function prewarmMediaUpload(_moduleId: string): void {}
 
 export function discardPrewarmedMediaUpload(_moduleId: string): void {}
 
+export async function discardMedia(_mediaId: string): Promise<void> {}
+
 export async function prepareMediaFile(filePath: string, _purpose: 'record_photo' | 'avatar'): Promise<PreparedMediaFile> {
   const info = await new Promise<WechatMiniprogram.GetImageInfoSuccessCallbackResult>((resolve, reject) => {
     wx.getImageInfo({ src: filePath, success: resolve, fail: reject });
@@ -531,6 +543,7 @@ export interface SaveRecordInput {
   remark: string;
   clientRequestId: string;
   mediaId?: string;
+  mediaVariant?: 'sticker' | 'original';
 }
 
 export async function saveRecord(input: SaveRecordInput): Promise<LifeRecord> {
@@ -566,7 +579,9 @@ export async function saveRecord(input: SaveRecordInput): Promise<LifeRecord> {
         throw new Error('RECORD_ACCESS_DENIED');
       }
       existing.originalPath = input.originalPath;
-      existing.stickerPath = input.stickerPath;
+      existing.generatedStickerPath = input.stickerPath;
+      existing.mediaVariant = input.mediaVariant ?? 'sticker';
+      existing.stickerPath = existing.mediaVariant === 'original' ? input.originalPath : input.stickerPath;
       existing.remark = input.remark.trim();
       existing.updatedAt = now;
       database.idempotency[input.clientRequestId] = existing.recordId;
@@ -582,7 +597,9 @@ export async function saveRecord(input: SaveRecordInput): Promise<LifeRecord> {
       userId: database.currentUser.userId,
       recordDate: input.recordDate,
       originalPath: input.originalPath,
-      stickerPath: input.stickerPath,
+      stickerPath: input.mediaVariant === 'original' ? input.originalPath : input.stickerPath,
+      generatedStickerPath: input.stickerPath,
+      mediaVariant: input.mediaVariant ?? 'sticker',
       remark: input.remark.trim(),
       source: 'normal',
       status: 'active',
@@ -592,6 +609,7 @@ export async function saveRecord(input: SaveRecordInput): Promise<LifeRecord> {
     database.records.push(record);
     database.idempotency[input.clientRequestId] = record.recordId;
     refreshLocalRecordProjections(database, module, input.recordDate);
+    evaluateLocalStreakRewards(database, module, record);
     track('record_submit_success', { recordId: record.recordId, editorMode: 'create', recordSource: 'normal' });
     return record;
   });
@@ -641,6 +659,9 @@ function purgeModuleData(database: AppDatabase, moduleId: string): void {
   database.reminders = database.reminders.filter((item) => item.moduleId !== moduleId);
   database.dailySnapshots = database.dailySnapshots.filter((item) => item.moduleId !== moduleId);
   database.monthlyMemoryCards = database.monthlyMemoryCards.filter((item) => item.moduleId !== moduleId);
+  database.streakRewardRules = database.streakRewardRules.filter((item) => item.moduleId !== moduleId);
+  database.streakRewardEvents = database.streakRewardEvents.filter((item) => item.moduleId !== moduleId);
+  database.streakRewardDraws = database.streakRewardDraws.filter((item) => item.moduleId !== moduleId);
 }
 
 function purgeExpiredModules(database: AppDatabase): void {
@@ -774,6 +795,15 @@ export async function removeModuleMember(moduleId: string, targetMemberInstanceI
     target.active = false;
     target.leftAt = now;
     target.leaveReason = 'removed';
+    database.streakRewardRules
+      .filter((rule) => rule.moduleId === moduleId && rule.status === 'active'
+        && (rule.sponsorMemberInstanceId === target.memberInstanceId
+          || rule.targetMemberInstanceId === target.memberInstanceId))
+      .forEach((rule) => {
+        rule.status = 'cancelled';
+        rule.cancelledAt = now;
+        rule.updatedAt = now;
+      });
     database.makeupApprovals
       .filter((approval) => approval.applicantMemberInstanceId === target.memberInstanceId && approval.status === 'pending')
       .forEach((approval) => {
@@ -1303,6 +1333,7 @@ export interface SubmitMakeupInput {
   remark: string;
   clientRequestId: string;
   mediaId?: string;
+  mediaVariant?: 'sticker' | 'original';
 }
 
 export async function submitMakeupRecord(input: SubmitMakeupInput): Promise<{ record: LifeRecord; approval?: MakeupApproval }> {
@@ -1340,7 +1371,9 @@ export async function submitMakeupRecord(input: SubmitMakeupInput): Promise<{ re
       userId: database.currentUser.userId,
       recordDate: input.recordDate,
       originalPath: input.originalPath,
-      stickerPath: input.stickerPath,
+      stickerPath: input.mediaVariant === 'original' ? input.originalPath : input.stickerPath,
+      generatedStickerPath: input.stickerPath,
+      mediaVariant: input.mediaVariant ?? 'sticker',
       remark: input.remark.trim(),
       source: 'makeup',
       status: direct ? 'locked' : 'pending',
@@ -1628,8 +1661,468 @@ export async function getModuleGallery(moduleId: string, month: string): Promise
   return { moduleId, moduleName: module.name, recordPolicy: module.recordPolicy, month, items };
 }
 
+export interface StreakRewardRuleView {
+  rules: Array<{
+    rule: StreakRewardRule;
+    progressDays: number;
+    targetMemberName?: string;
+  }>;
+}
+
+export interface SaveStreakRewardRuleInput {
+  targetType: StreakRewardTargetType;
+  targetMemberInstanceId?: string;
+  streakDays: number;
+  prizeTitle: string;
+  prizeDescription: string;
+  coverMediaId?: string;
+  coverPath?: string;
+  winProbability: 20 | 50 | 80 | 100;
+  termsAccepted: true;
+}
+
+export interface PendingStreakReward {
+  rewardDrawId: string;
+  moduleId: string;
+  sponsorName: string;
+  targetType: StreakRewardTargetType;
+  streakDays: number;
+  windowStart: string;
+  windowEnd: string;
+}
+
+export interface RevealedStreakReward extends PendingStreakReward {
+  resultType: 'gift' | 'sticker';
+  prizeTitle: string;
+  prizeDescription: string;
+  stickerPath?: string;
+  coverPath?: string;
+  stickerRecordDate?: string;
+  stickerRemark?: string;
+  stickerMemberName?: string;
+  revealedAt?: string;
+}
+
+export interface ReceivedStreakRewards {
+  items: RevealedStreakReward[];
+  counts: { all: number; gift: number; sticker: number };
+}
+
+export interface StreakRewardPreview {
+  pending: PendingStreakReward;
+  revealed: RevealedStreakReward;
+}
+
+const isNormalFormalRecord = (record: LifeRecord): boolean => record.source === 'normal' && isFormalRecord(record);
+
+function memberIdsForRewardDate(module: LifeModule, date: string): string[] {
+  return module.members
+    .filter((member) => member.joinedAt.slice(0, 10) <= date && (!member.leftAt || member.leftAt.slice(0, 10) > date))
+    .sort((left, right) => left.joinSequence - right.joinSequence)
+    .map((member) => member.memberInstanceId);
+}
+
+function hasRewardRecord(database: AppDatabase, memberInstanceId: string, date: string): boolean {
+  return database.records.some((record) => record.memberInstanceId === memberInstanceId
+    && record.recordDate === date && isNormalFormalRecord(record));
+}
+
+function sameMemberSet(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((memberId, index) => memberId === right[index]);
+}
+
+function ruleQualifies(
+  database: AppDatabase,
+  module: LifeModule,
+  rule: StreakRewardRule,
+  endDate: string,
+  triggerMemberInstanceId: string,
+): { memberIds: string[]; windowStart: string } | undefined {
+  const windowStart = addDays(endDate, 1 - rule.streakDays);
+  if (rule.targetType === 'member') {
+    const memberId = rule.targetMemberInstanceId;
+    if (!memberId || triggerMemberInstanceId !== memberId) return undefined;
+    for (let offset = 0; offset < rule.streakDays; offset += 1) {
+      const date = addDays(windowStart, offset);
+      if (!memberIdsForRewardDate(module, date).includes(memberId) || !hasRewardRecord(database, memberId, date)) return undefined;
+    }
+    return { memberIds: [memberId], windowStart };
+  }
+
+  const expected = memberIdsForRewardDate(module, windowStart);
+  if (expected.length < 2) return undefined;
+  for (let offset = 0; offset < rule.streakDays; offset += 1) {
+    const date = addDays(windowStart, offset);
+    const memberIds = memberIdsForRewardDate(module, date);
+    if (!sameMemberSet(expected, memberIds) || memberIds.some((memberId) => !hasRewardRecord(database, memberId, date))) return undefined;
+  }
+  return { memberIds: expected, windowStart };
+}
+
+function evaluateLocalStreakRewards(database: AppDatabase, module: LifeModule, triggerRecord: LifeRecord): void {
+  if (module.recordPolicy !== 'strict' || triggerRecord.source !== 'normal'
+    || triggerRecord.recordDate !== shanghaiDate() || !isFormalRecord(triggerRecord)) return;
+  const now = shanghaiNowIso();
+  database.streakRewardRules
+    .filter((rule) => rule.moduleId === module.moduleId && rule.status === 'active')
+    .forEach((rule) => {
+      if (rule.expiresAt <= now) {
+        rule.status = 'expired';
+        rule.updatedAt = now;
+        return;
+      }
+      if (rule.createdAt > triggerRecord.firstEffectiveAt) return;
+      const qualification = ruleQualifies(
+        database,
+        module,
+        rule,
+        triggerRecord.recordDate,
+        triggerRecord.memberInstanceId,
+      );
+      if (!qualification) return;
+      const sponsor = module.members.find((member) => member.memberInstanceId === rule.sponsorMemberInstanceId);
+      const event = {
+        rewardEventId: createId('reward_event'),
+        rewardRuleId: rule.rewardRuleId,
+        moduleId: module.moduleId,
+        triggerRecordId: triggerRecord.recordId,
+        sponsorNameSnapshot: sponsor?.nickname ?? '一位伙伴',
+        targetType: rule.targetType,
+        coverPathSnapshot: rule.coverPath,
+        prizeTitleSnapshot: rule.prizeTitle,
+        prizeDescriptionSnapshot: rule.prizeDescription,
+        winProbability: rule.winProbability,
+        windowStart: qualification.windowStart,
+        windowEnd: triggerRecord.recordDate,
+        createdAt: now,
+      };
+      database.streakRewardEvents.push(event);
+      qualification.memberIds.forEach((memberInstanceId) => {
+        const recipient = module.members.find((member) => member.memberInstanceId === memberInstanceId);
+        if (!recipient) return;
+        const stickerRecord = database.records
+          .filter((record) => record.memberInstanceId === memberInstanceId
+            && record.recordDate >= qualification.windowStart && record.recordDate <= triggerRecord.recordDate
+            && isNormalFormalRecord(record))
+          .sort((left, right) => right.recordDate.localeCompare(left.recordDate))[0];
+        const draw: StreakRewardDraw = {
+          rewardDrawId: createId('reward_draw'),
+          rewardEventId: event.rewardEventId,
+          moduleId: module.moduleId,
+          recipientUserId: recipient.userId,
+          recipientMemberInstanceId: memberInstanceId,
+          resultType: Math.random() * 100 < rule.winProbability ? 'gift' : 'sticker',
+          stickerRecordId: stickerRecord?.recordId,
+          status: 'sealed',
+          createdAt: now,
+          updatedAt: now,
+        };
+        database.streakRewardDraws.push(draw);
+      });
+      rule.status = 'triggered';
+      rule.triggeredAt = now;
+      rule.updatedAt = now;
+    });
+}
+
+function rewardProgressDays(database: AppDatabase, module: LifeModule, rule: StreakRewardRule): number {
+  let cursor = shanghaiDate();
+  const isComplete = (date: string): boolean => {
+    if (rule.targetType === 'member') {
+      return Boolean(rule.targetMemberInstanceId && memberIdsForRewardDate(module, date).includes(rule.targetMemberInstanceId)
+        && hasRewardRecord(database, rule.targetMemberInstanceId, date));
+    }
+    const members = memberIdsForRewardDate(module, date);
+    return members.length >= 2 && members.every((memberId) => hasRewardRecord(database, memberId, date));
+  };
+  if (!isComplete(cursor)) cursor = addDays(cursor, -1);
+  const baseline = memberIdsForRewardDate(module, cursor);
+  let days = 0;
+  while (days < rule.streakDays && isComplete(cursor)) {
+    if (rule.targetType === 'all' && !sameMemberSet(baseline, memberIdsForRewardDate(module, cursor))) break;
+    days += 1;
+    cursor = addDays(cursor, -1);
+  }
+  return days;
+}
+
+export async function getMyStreakRewardRule(moduleId: string): Promise<StreakRewardRuleView> {
+  await delay(60);
+  return updateDatabase((database) => {
+    const module = database.modules.find((item) => item.moduleId === moduleId);
+    if (!module) throw new Error('MODULE_NOT_FOUND');
+    const currentMember = findActiveMember(database, module);
+    const now = shanghaiNowIso();
+    const rules = database.streakRewardRules
+      .filter((item) => item.moduleId === moduleId && item.sponsorMemberInstanceId === currentMember.memberInstanceId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    rules.forEach((rule) => {
+      if (rule.status === 'active' && rule.expiresAt <= now) {
+        rule.status = 'expired';
+        rule.updatedAt = now;
+      }
+    });
+    return { rules: rules.map((rule) => ({
+      rule,
+      progressDays: rule.status === 'active' ? rewardProgressDays(database, module, rule) : 0,
+      targetMemberName: rule.targetMemberInstanceId
+        ? module.members.find((member) => member.memberInstanceId === rule.targetMemberInstanceId)?.nickname
+        : undefined,
+    })) };
+  });
+}
+
+export async function saveStreakRewardRule(
+  moduleId: string,
+  input: SaveStreakRewardRuleInput,
+): Promise<StreakRewardRuleView> {
+  await delay(100);
+  updateDatabase((database) => {
+    const module = database.modules.find((item) => item.moduleId === moduleId);
+    if (!module) throw new Error('MODULE_NOT_FOUND');
+    const sponsor = findActiveMember(database, module);
+    if (module.recordPolicy !== 'strict') throw new Error('REWARD_STRICT_ONLY');
+    const title = input.prizeTitle.trim();
+    const description = input.prizeDescription.trim();
+    if (!title || title.length > 20 || description.length > 80) throw new Error('REWARD_CONTENT_INVALID');
+    if (![20, 50, 80, 100].includes(input.winProbability)) throw new Error('REWARD_PROBABILITY_INVALID');
+    if (!Number.isInteger(input.streakDays) || input.streakDays < 1 || input.streakDays > 100) throw new Error('REWARD_DAYS_INVALID');
+    if (input.termsAccepted !== true) throw new Error('REWARD_TERMS_REQUIRED');
+    if (input.targetType === 'all' && activeMembers(module).length < 2) throw new Error('REWARD_ALL_NEEDS_GROUP');
+    if (input.targetType === 'member'
+      && !module.members.some((member) => member.active && member.memberInstanceId === input.targetMemberInstanceId)) {
+      throw new Error('REWARD_TARGET_INVALID');
+    }
+    const now = shanghaiNowIso();
+    database.streakRewardRules.push({
+      rewardRuleId: createId('reward_rule'),
+      moduleId,
+      sponsorUserId: database.currentUser.userId,
+      sponsorMemberInstanceId: sponsor.memberInstanceId,
+      targetType: input.targetType,
+      targetMemberInstanceId: input.targetType === 'member' ? input.targetMemberInstanceId : undefined,
+      prizeTitle: title,
+      prizeDescription: description,
+      coverMediaId: input.coverMediaId,
+      coverPath: input.coverPath,
+      winProbability: input.winProbability,
+      streakDays: input.streakDays,
+      status: 'active',
+      expiresAt: shanghaiNowIso(new Date(Date.now() + 90 * 86_400_000)),
+      createdAt: now,
+      updatedAt: now,
+    });
+    addAudit(database, 'save_streak_reward', moduleId);
+  });
+  track('streak_reward_rule_saved', { moduleId, targetType: input.targetType, probability: input.winProbability });
+  return getMyStreakRewardRule(moduleId);
+}
+
+export async function cancelStreakRewardRule(moduleId: string, rewardRuleId: string): Promise<void> {
+  await delay(80);
+  updateDatabase((database) => {
+    const module = database.modules.find((item) => item.moduleId === moduleId);
+    if (!module) throw new Error('MODULE_NOT_FOUND');
+    const sponsor = findActiveMember(database, module);
+    const now = shanghaiNowIso();
+    const rule = database.streakRewardRules.find((item) => item.rewardRuleId === rewardRuleId
+      && item.moduleId === moduleId && item.sponsorMemberInstanceId === sponsor.memberInstanceId);
+    if (rule?.status === 'active') {
+      rule.status = 'cancelled';
+      rule.cancelledAt = now;
+      rule.updatedAt = now;
+    }
+    addAudit(database, 'cancel_streak_reward', moduleId);
+  });
+}
+
+export async function previewStreakReward(moduleId: string, rewardRuleId: string): Promise<StreakRewardPreview> {
+  await delay(80);
+  const database = readDatabase();
+  const module = database.modules.find((item) => item.moduleId === moduleId);
+  if (!module) throw new Error('MODULE_NOT_FOUND');
+  const sponsor = findActiveMember(database, module);
+  if (module.recordPolicy !== 'strict') throw new Error('REWARD_STRICT_ONLY');
+  const rule = database.streakRewardRules.find((item) => item.rewardRuleId === rewardRuleId
+    && item.moduleId === moduleId && item.sponsorMemberInstanceId === sponsor.memberInstanceId
+    && item.status === 'active');
+  if (!rule) throw new Error('REWARD_RULE_NOT_ACTIVE');
+
+  const recipientMemberId = rule.targetType === 'member'
+    ? rule.targetMemberInstanceId
+    : sponsor.memberInstanceId;
+  const sticker = database.records
+    .filter((record) => record.moduleId === moduleId && record.memberInstanceId === recipientMemberId
+      && isNormalFormalRecord(record))
+    .sort((left, right) => right.recordDate.localeCompare(left.recordDate))[0];
+  const rewardDrawId = createId('reward_preview');
+  const windowEnd = shanghaiDate();
+  const windowStart = addDays(windowEnd, 1 - rule.streakDays);
+  const resultType = Math.random() * 100 < rule.winProbability ? 'gift' : 'sticker';
+  const pending: PendingStreakReward = {
+    rewardDrawId,
+    moduleId,
+    sponsorName: sponsor.nickname,
+    targetType: rule.targetType,
+    streakDays: rule.streakDays,
+    windowStart,
+    windowEnd,
+  };
+  return {
+    pending,
+    revealed: {
+      ...pending,
+      resultType,
+      prizeTitle: resultType === 'gift' ? rule.prizeTitle : `${rule.streakDays}日纪念贴`,
+      prizeDescription: resultType === 'gift' ? rule.prizeDescription : `把这${rule.streakDays}天收进口袋`,
+      stickerPath: resultType === 'sticker' ? sticker?.stickerPath : undefined,
+      coverPath: resultType === 'gift' ? rule.coverPath : undefined,
+      stickerRecordDate: resultType === 'sticker' ? sticker?.recordDate : undefined,
+      stickerRemark: resultType === 'sticker' ? sticker?.remark : undefined,
+      stickerMemberName: resultType === 'sticker'
+        ? module.members.find((member) => member.memberInstanceId === sticker?.memberInstanceId)?.nickname
+        : undefined,
+    },
+  };
+}
+
+export async function getPendingStreakReward(moduleId: string): Promise<PendingStreakReward | undefined> {
+  return (await getPendingStreakRewards(moduleId))[0];
+}
+
+export async function getPendingStreakRewards(moduleId: string): Promise<PendingStreakReward[]> {
+  await delay(50);
+  const database = readDatabase();
+  const module = database.modules.find((item) => item.moduleId === moduleId);
+  if (!module) throw new Error('MODULE_NOT_FOUND');
+  findActiveMember(database, module);
+  const draws = database.streakRewardDraws
+    .filter((item) => item.moduleId === moduleId && item.recipientUserId === database.currentUser.userId
+      && item.status === 'sealed')
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  return draws.flatMap((draw) => {
+    const event = database.streakRewardEvents.find((item) => item.rewardEventId === draw.rewardEventId);
+    if (!event) return [];
+    return [{
+      rewardDrawId: draw.rewardDrawId,
+      moduleId,
+      sponsorName: event.sponsorNameSnapshot,
+      targetType: event.targetType,
+      streakDays: database.streakRewardRules.find((rule) => rule.rewardRuleId === event.rewardRuleId)?.streakDays ?? 7,
+      windowStart: event.windowStart,
+      windowEnd: event.windowEnd,
+    }];
+  });
+}
+
+export async function revealStreakReward(rewardDrawId: string): Promise<RevealedStreakReward> {
+  await delay(180);
+  return updateDatabase((database) => {
+    const draw = database.streakRewardDraws.find((item) => item.rewardDrawId === rewardDrawId
+      && item.recipientUserId === database.currentUser.userId);
+    if (!draw) throw new Error('REWARD_DRAW_NOT_FOUND');
+    const event = database.streakRewardEvents.find((item) => item.rewardEventId === draw.rewardEventId);
+    if (!event) throw new Error('REWARD_EVENT_NOT_FOUND');
+    const streakDays = database.streakRewardRules.find((rule) => rule.rewardRuleId === event.rewardRuleId)?.streakDays ?? 7;
+    if (draw.status === 'sealed') {
+      const now = shanghaiNowIso();
+      draw.status = 'revealed';
+      draw.revealedAt = now;
+      draw.updatedAt = now;
+      database.notifications.push({
+        notificationId: createId('notification'),
+        userId: database.currentUser.userId,
+        type: 'reward_result',
+        title: draw.resultType === 'gift' ? '连续打卡惊喜' : `${streakDays}日纪念贴`,
+        content: draw.resultType === 'gift' ? `你获得了「${event.prizeTitleSnapshot}」` : `你收下了一张${streakDays}日纪念贴`,
+        moduleId: draw.moduleId,
+        targetType: 'reward_draw',
+        targetId: draw.rewardDrawId,
+        actionType: 'none',
+        actionStatus: 'none',
+        isRead: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    const sticker = draw.stickerRecordId
+      ? database.records.find((record) => record.recordId === draw.stickerRecordId)
+      : undefined;
+    return {
+      rewardDrawId: draw.rewardDrawId,
+      moduleId: draw.moduleId,
+      sponsorName: event.sponsorNameSnapshot,
+      targetType: event.targetType,
+      streakDays,
+      windowStart: event.windowStart,
+      windowEnd: event.windowEnd,
+      resultType: draw.resultType,
+      prizeTitle: draw.resultType === 'gift' ? event.prizeTitleSnapshot : `${streakDays}日纪念贴`,
+      prizeDescription: draw.resultType === 'gift' ? event.prizeDescriptionSnapshot : `把这${streakDays}天收进口袋`,
+      stickerPath: sticker?.stickerPath,
+      coverPath: draw.resultType === 'gift' ? event.coverPathSnapshot : undefined,
+      stickerRecordDate: draw.resultType === 'sticker' ? sticker?.recordDate : undefined,
+      stickerRemark: draw.resultType === 'sticker' ? sticker?.remark : undefined,
+      stickerMemberName: draw.resultType === 'sticker'
+        ? database.modules.find((item) => item.moduleId === draw.moduleId)?.members
+          .find((member) => member.memberInstanceId === sticker?.memberInstanceId)?.nickname
+        : undefined,
+      revealedAt: draw.revealedAt,
+    };
+  });
+}
+
+export async function getReceivedStreakRewards(moduleId: string): Promise<ReceivedStreakRewards> {
+  await delay(60);
+  const database = readDatabase();
+  const module = database.modules.find((item) => item.moduleId === moduleId);
+  if (!module) throw new Error('MODULE_NOT_FOUND');
+  findActiveMember(database, module);
+  const items = database.streakRewardDraws
+    .filter((draw) => draw.moduleId === moduleId && draw.recipientUserId === database.currentUser.userId
+      && draw.status === 'revealed')
+    .sort((left, right) => (right.revealedAt ?? right.createdAt).localeCompare(left.revealedAt ?? left.createdAt))
+    .flatMap((draw) => {
+      const event = database.streakRewardEvents.find((entry) => entry.rewardEventId === draw.rewardEventId);
+      if (!event) return [];
+      const rule = database.streakRewardRules.find((entry) => entry.rewardRuleId === event.rewardRuleId);
+      const sticker = draw.stickerRecordId
+        ? database.records.find((record) => record.recordId === draw.stickerRecordId) : undefined;
+      const streakDays = rule?.streakDays ?? 7;
+      return [{
+        rewardDrawId: draw.rewardDrawId,
+        moduleId,
+        sponsorName: event.sponsorNameSnapshot,
+        targetType: event.targetType,
+        streakDays,
+        windowStart: event.windowStart,
+        windowEnd: event.windowEnd,
+        resultType: draw.resultType,
+        prizeTitle: draw.resultType === 'gift' ? event.prizeTitleSnapshot : `${streakDays}日纪念贴`,
+        prizeDescription: draw.resultType === 'gift' ? event.prizeDescriptionSnapshot : `把这${streakDays}天收进口袋`,
+        stickerPath: draw.resultType === 'sticker' ? sticker?.stickerPath : undefined,
+        coverPath: draw.resultType === 'gift' ? event.coverPathSnapshot : undefined,
+        stickerRecordDate: sticker?.recordDate,
+        stickerRemark: sticker?.remark,
+        stickerMemberName: module.members.find((member) => member.memberInstanceId === sticker?.memberInstanceId)?.nickname,
+        revealedAt: draw.revealedAt,
+      } satisfies RevealedStreakReward];
+    });
+  return {
+    items,
+    counts: {
+      all: items.length,
+      gift: items.filter((item) => item.resultType === 'gift').length,
+      sticker: items.filter((item) => item.resultType === 'sticker').length,
+    },
+  };
+}
+
 export interface ReminderView extends ReminderSubscription {
   moduleName: string;
+  checkinNotificationsEnabled: boolean;
+  checkinNotificationStatus: NonNullable<ReminderSubscription['checkinNotificationStatus']>;
+  checkinNotificationCredits: number;
 }
 
 export async function getModuleReminder(moduleId: string): Promise<ReminderView> {
@@ -1657,7 +2150,13 @@ export async function getModuleReminder(moduleId: string): Promise<ReminderView>
       };
       database.reminders.push(reminder);
     }
-    return { ...reminder, moduleName: module.name };
+    return {
+      ...reminder,
+      checkinNotificationsEnabled: Boolean(reminder.checkinNotificationsEnabled),
+      checkinNotificationStatus: reminder.checkinNotificationStatus ?? 'not_requested',
+      checkinNotificationCredits: reminder.checkinNotificationCredits ?? 0,
+      moduleName: module.name,
+    };
   });
 }
 
@@ -1695,7 +2194,59 @@ export async function updateModuleReminder(moduleId: string, input: UpdateRemind
     }
     addAudit(database, 'update_reminder', moduleId, reminder.reminderId);
     track('reminder_update_success', { moduleId, enabled: input.enabled, subscriptionStatus: input.subscriptionStatus });
-    return { ...reminder, moduleName: module.name };
+    return {
+      ...reminder,
+      checkinNotificationsEnabled: Boolean(reminder.checkinNotificationsEnabled),
+      checkinNotificationStatus: reminder.checkinNotificationStatus ?? 'not_requested',
+      checkinNotificationCredits: reminder.checkinNotificationCredits ?? 0,
+      moduleName: module.name,
+    };
+  });
+}
+
+export async function updateCheckinNotificationSubscription(
+  moduleId: string,
+  enabled: boolean,
+): Promise<ReminderView> {
+  await delay(80);
+  return updateDatabase((database) => {
+    const module = database.modules.find((item) => item.moduleId === moduleId);
+    if (!module) throw new Error('MODULE_NOT_FOUND');
+    findActiveMember(database, module);
+    if (module.mode !== 'group') throw new Error('GROUP_MODULE_REQUIRED');
+    const now = shanghaiNowIso();
+    let reminder = database.reminders.find(
+      (item) => item.moduleId === moduleId && item.userId === database.currentUser.userId,
+    );
+    if (!reminder) {
+      reminder = {
+        reminderId: createId('reminder'),
+        moduleId,
+        userId: database.currentUser.userId,
+        enabled: false,
+        reminderTime: '21:00',
+        inAppEnabled: true,
+        subscriptionStatus: 'not_requested',
+        paused: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+      database.reminders.push(reminder);
+    }
+    const credits = enabled ? Math.min(20, (reminder.checkinNotificationCredits ?? 0) + 1) : 0;
+    Object.assign(reminder, {
+      checkinNotificationsEnabled: enabled,
+      checkinNotificationStatus: enabled ? 'authorized' : 'disabled',
+      checkinNotificationCredits: credits,
+      updatedAt: now,
+    });
+    return {
+      ...reminder,
+      checkinNotificationsEnabled: enabled,
+      checkinNotificationStatus: reminder.checkinNotificationStatus ?? 'not_requested',
+      checkinNotificationCredits: credits,
+      moduleName: module.name,
+    };
   });
 }
 
@@ -1947,9 +2498,11 @@ function selectFairMemoryRecords(records: LifeRecord[], seed: string): LifeRecor
   const groups = new Map<string, LifeRecord[]>();
   records.forEach((record) => groups.set(record.memberInstanceId, [...(groups.get(record.memberInstanceId) ?? []), record]));
   const memberIds = deterministicShuffle([...groups.keys()], `${seed}:members`);
+  const smallestGroupSize = Math.min(...[...groups.values()].map((group) => group.length));
+  const perMemberLimit = smallestGroupSize + 1;
   const queues = new Map(memberIds.map((memberId) => [
     memberId,
-    deterministicShuffle(groups.get(memberId) ?? [], `${seed}:${memberId}`),
+    deterministicShuffle(groups.get(memberId) ?? [], `${seed}:${memberId}`).slice(0, perMemberLimit),
   ]));
   const selected: LifeRecord[] = [];
   while (selected.length < 8) {
@@ -1967,13 +2520,118 @@ function selectFairMemoryRecords(records: LifeRecord[], seed: string): LifeRecor
   return selected;
 }
 
+export type MemoryReportMode = 'week' | 'month';
 export interface MemoryModuleOption { moduleId: string; name: string }
-export interface MemoryStickerItem { recordId: string; stickerPath: string; displayOrder: number }
+export interface MemoryStickerItem {
+  recordId: string;
+  moduleId: string;
+  recordDate: string;
+  stickerPath: string;
+  displayOrder: number;
+}
+export interface MemoryFootprintItem {
+  date: string;
+  recordCount: number;
+  level: number;
+  stickerPath?: string;
+}
+export type MemoryCollageAssetType = 'record_sticker' | 'decorative_sticker';
+export interface MemoryCollageItem {
+  itemId: string;
+  assetType: MemoryCollageAssetType;
+  recordId?: string;
+  moduleId?: string;
+  recordDate?: string;
+  stickerAssetId?: string;
+  name?: string;
+  imagePath: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  zIndex: number;
+}
+export interface MemoryCollageBoardAsset {
+  boardAssetId: string;
+  name: string;
+  category?: string;
+  thumbnailPath: string;
+  imagePath: string;
+  editableBounds: {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+  };
+}
+export interface MemoryCollageStickerAsset {
+  stickerAssetId: string;
+  name: string;
+  category: string;
+  thumbnailPath: string;
+  imagePath: string;
+  defaultWidth: number;
+  defaultHeight: number;
+}
+export interface SavedMemoryCollage {
+  collageId: string;
+  version: number;
+  savedAt: string;
+  board: MemoryCollageBoardAsset | null;
+  items: MemoryCollageItem[];
+}
+export interface MemoryCollageView {
+  reportMode: MemoryReportMode;
+  periodKey: string;
+  scopeKey: string;
+  moduleId: string;
+  moduleName: string;
+  collage: SavedMemoryCollage | null;
+  availableRecordStickers: MemoryStickerItem[];
+  boards: MemoryCollageBoardAsset[];
+  decorativeStickers: MemoryCollageStickerAsset[];
+  decorativeStickerCategories: string[];
+}
+export interface SaveMemoryCollageInput {
+  moduleId?: string;
+  reportMode: MemoryReportMode;
+  periodKey: string;
+  boardAssetId?: string;
+  baseVersion: number;
+  force?: boolean;
+  items: Array<{
+    assetType: MemoryCollageAssetType;
+    recordId?: string;
+    stickerAssetId?: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation: number;
+    zIndex: number;
+  }>;
+}
 export interface MemoryView {
+  reportMode: MemoryReportMode;
+  periodKey: string;
+  periodStart: string;
+  periodEnd: string;
+  isCurrentPeriod: boolean;
+  momentCount: number;
+  previousMomentCount: number;
   recordedDays: number;
+  previousRecordedDays: number;
   participatedModuleCount: number;
   jointCompletedDays: number;
+  previousJointCompletedDays: number;
+  hasPartnerModules: boolean;
+  longestStreakDays: number;
+  previousLongestStreakDays: number;
   currentStreakDays: number;
+  currentStreakOngoing: boolean;
+  earliestTime?: string;
+  latestTime?: string;
   receivedReactionCount: number;
   weeklyRecordCount: number;
   moduleId: string;
@@ -1981,9 +2639,24 @@ export interface MemoryView {
   month: string;
   modules: MemoryModuleOption[];
   items: MemoryStickerItem[];
+  footprint: MemoryFootprintItem[];
   monthlyJointCompletedDays: number;
   monthlyReceivedReactionCount: number;
   mostUsedEmoji: string;
+  latestStickerPath?: string;
+  collage?: SavedMemoryCollage | null;
+}
+
+export async function getMemoryCollage(
+  _moduleId: string | undefined,
+  _periodKey: string,
+  _reportMode: MemoryReportMode,
+): Promise<MemoryCollageView> {
+  throw new Error('REMOTE_DATA_REQUIRED');
+}
+
+export async function saveMemoryCollage(_input: SaveMemoryCollageInput): Promise<MemoryCollageView> {
+  throw new Error('REMOTE_DATA_REQUIRED');
 }
 
 function calculateCurrentStreak(recordDates: Set<string>): number {
@@ -2059,68 +2732,193 @@ function resolveMemoryCard(database: AppDatabase, moduleId: string, month: strin
   return card;
 }
 
-export async function getMemoryView(moduleId?: string, month = shanghaiDate().slice(0, 7), forceChange = false): Promise<MemoryView> {
+const localMemoryGeneration = new Map<string, number>();
+
+export async function getMemoryView(
+  moduleId?: string,
+  periodInput = shanghaiDate().slice(0, 7),
+  forceChange = false,
+  reportMode: MemoryReportMode = 'month',
+  allModules = false,
+): Promise<MemoryView> {
   await delay(110);
   return updateDatabase((database) => {
     purgeExpiredModules(database);
     ensureDailySnapshots(database);
     const modules = database.modules.filter((module) => module.status === 'active'
       && module.members.some((member) => member.userId === database.currentUser.userId && member.active));
-    if (!modules.length) throw new Error('NO_ACTIVE_MODULE');
     const recentModuleId = database.records
       .filter((record) => record.recordDate <= shanghaiDate() && isFormalRecord(record)
         && modules.some((module) => module.moduleId === record.moduleId))
       .sort((left, right) => right.firstEffectiveAt.localeCompare(left.firstEffectiveAt))[0]?.moduleId;
     const selectedModule = modules.find((module) => module.moduleId === moduleId)
-      ?? modules.find((module) => module.moduleId === recentModuleId)
-      ?? modules[0];
+      ?? (!allModules ? modules.find((module) => module.moduleId === recentModuleId) ?? modules[0] : undefined);
+    const scopedModules = selectedModule ? [selectedModule] : modules;
+    const scopedModuleIds = new Set(scopedModules.map((module) => module.moduleId));
     const today = shanghaiDate();
-    const weekStart = addDays(today, -6);
+    const range = localMemoryRange(reportMode, periodInput, today);
     const myRecords = database.records.filter((record) => record.userId === database.currentUser.userId
-      && record.recordDate >= weekStart && record.recordDate <= today && isFormalRecord(record));
-    const myDateSet = new Set(database.records
-      .filter((record) => record.userId === database.currentUser.userId
-        && record.recordDate <= today && isFormalRecord(record))
-      .map((record) => record.recordDate));
-    const currentUserRecordIds = new Set(database.records
-      .filter((record) => record.userId === database.currentUser.userId
-        && record.recordDate <= today && isFormalRecord(record))
-      .map((record) => record.recordId));
-    const received = database.reactions.filter((reaction) => reaction.status === 'active' && currentUserRecordIds.has(reaction.recordId));
-    const card = resolveMemoryCard(database, selectedModule.moduleId, month, forceChange);
-    const cardRecords = card.recordIds.map((recordId) => database.records.find((record) => record.recordId === recordId)).filter(Boolean) as LifeRecord[];
-    const monthlyRecordIds = new Set(database.records
-      .filter((record) => record.moduleId === selectedModule.moduleId && record.recordDate.startsWith(month)
-        && record.recordDate <= today && isFormalRecord(record))
-      .map((record) => record.recordId));
-    const monthlyReactions = database.reactions.filter((reaction) => reaction.status === 'active' && monthlyRecordIds.has(reaction.recordId));
+      && scopedModuleIds.has(record.moduleId) && record.recordDate >= range.previousStart
+      && record.recordDate < range.endExclusive && record.recordDate <= today && isFormalRecord(record));
+    const currentRecords = myRecords.filter((record) => record.recordDate >= range.start);
+    const latestRecord = [...currentRecords]
+      .sort((left, right) => right.firstEffectiveAt.localeCompare(left.firstEffectiveAt)
+        || right.recordId.localeCompare(left.recordId))[0];
+    const previousRecords = myRecords.filter((record) => record.recordDate < range.start);
+    const currentDates = new Set(currentRecords.map((record) => record.recordDate));
+    const previousDates = new Set(previousRecords.map((record) => record.recordDate));
+    const allRecordedDates = new Set(database.records.filter((record) => record.userId === database.currentUser.userId
+      && scopedModuleIds.has(record.moduleId) && record.recordDate <= range.end
+      && record.recordDate <= today && isFormalRecord(record)).map((record) => record.recordDate));
+    const currentJoint = database.dailySnapshots.filter((snapshot) => scopedModuleIds.has(snapshot.moduleId)
+      && snapshot.recordDate >= range.start && snapshot.recordDate < range.endExclusive
+      && snapshot.recordDate <= today && snapshot.requiredMemberCount > 1 && snapshot.isAllCompleted).length;
+    const previousJoint = database.dailySnapshots.filter((snapshot) => scopedModuleIds.has(snapshot.moduleId)
+      && snapshot.recordDate >= range.previousStart && snapshot.recordDate < range.start
+      && snapshot.requiredMemberCount > 1 && snapshot.isAllCompleted).length;
+    const hasPartnerModules = scopedModules.some((module) => activeMembers(module).length > 1)
+      || database.dailySnapshots.some((snapshot) => scopedModuleIds.has(snapshot.moduleId)
+        && snapshot.recordDate >= range.previousStart && snapshot.recordDate < range.endExclusive
+        && snapshot.requiredMemberCount > 1);
+    const currentRecordIds = new Set(currentRecords.map((record) => record.recordId));
+    const received = database.reactions.filter((reaction) => reaction.status === 'active' && currentRecordIds.has(reaction.recordId));
     const emojiCounts = new Map<ReactionEmoji, number>();
-    monthlyReactions.forEach((reaction) => emojiCounts.set(reaction.emojiCode, (emojiCounts.get(reaction.emojiCode) ?? 0) + 1));
+    received.forEach((reaction) => emojiCounts.set(reaction.emojiCode, (emojiCounts.get(reaction.emojiCode) ?? 0) + 1));
     const mostUsedCode = [...emojiCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0];
-    const emoji = mostUsedCode ? REACTION_EMOJIS[mostUsedCode] : '—';
+    const normalTimes = currentRecords.filter((record) => record.source !== 'makeup')
+      .map((record) => record.firstEffectiveAt?.slice(11, 16))
+      .filter(Boolean)
+      .sort() as string[];
+
+    const generationKey = `${database.currentUser.userId}:${reportMode}:${range.key}:${selectedModule?.moduleId ?? 'all'}`;
+    const generation = (localMemoryGeneration.get(generationKey) ?? 0) + (forceChange ? 1 : 0);
+    localMemoryGeneration.set(generationKey, generation);
+    const collageCandidates = database.records.filter((record) => scopedModuleIds.has(record.moduleId)
+      && record.recordDate >= range.start && record.recordDate < range.endExclusive
+      && record.recordDate <= today && isFormalRecord(record));
+    const cardRecords = reportMode === 'month' && selectedModule
+      ? resolveMemoryCard(database, selectedModule.moduleId, range.key, forceChange).recordIds
+          .map((recordId) => database.records.find((record) => record.recordId === recordId))
+          .filter(Boolean) as LifeRecord[]
+      : selectFairMemoryRecords(collageCandidates, `${generationKey}:${generation}`);
+    const featured = cardRecords[0];
+    const countByDate = new Map<string, number>();
+    currentRecords.forEach((record) => countByDate.set(record.recordDate, (countByDate.get(record.recordDate) ?? 0) + 1));
+    const currentEnd = range.end < today ? range.end : today;
     return {
-      recordedDays: new Set(myRecords.map((record) => record.recordDate)).size,
-      participatedModuleCount: new Set(myRecords.map((record) => record.moduleId)).size,
-      jointCompletedDays: database.dailySnapshots.filter((snapshot) => snapshot.recordDate >= weekStart
-        && snapshot.recordDate <= today && snapshot.isAllCompleted
-        && modules.some((module) => module.moduleId === snapshot.moduleId)).length,
-      currentStreakDays: calculateCurrentStreak(myDateSet),
-      receivedReactionCount: received.filter((reaction) => {
-        const record = database.records.find((item) => item.recordId === reaction.recordId);
-        return Boolean(record && record.recordDate >= weekStart && record.recordDate <= today);
-      }).length,
-      weeklyRecordCount: myRecords.length,
-      moduleId: selectedModule.moduleId,
-      moduleName: selectedModule.name,
-      month,
+      reportMode,
+      periodKey: range.key,
+      periodStart: range.start,
+      periodEnd: currentEnd,
+      isCurrentPeriod: range.isCurrent,
+      momentCount: currentRecords.length,
+      previousMomentCount: previousRecords.length,
+      recordedDays: currentDates.size,
+      previousRecordedDays: previousDates.size,
+      participatedModuleCount: new Set(currentRecords.map((record) => record.moduleId)).size,
+      jointCompletedDays: currentJoint,
+      previousJointCompletedDays: previousJoint,
+      hasPartnerModules,
+      longestStreakDays: longestMemoryStreak(currentDates),
+      previousLongestStreakDays: longestMemoryStreak(previousDates),
+      currentStreakDays: calculateTrailingMemoryStreak(allRecordedDates, currentEnd),
+      currentStreakOngoing: allRecordedDates.has(currentEnd),
+      earliestTime: normalTimes[0],
+      latestTime: normalTimes.at(-1),
+      receivedReactionCount: received.length,
+      weeklyRecordCount: currentRecords.length,
+      moduleId: selectedModule?.moduleId ?? '',
+      moduleName: selectedModule?.name ?? '',
+      month: reportMode === 'month' ? range.key : range.start.slice(0, 7),
       modules: modules.map((module) => ({ moduleId: module.moduleId, name: module.name })),
-      items: cardRecords.map((record, index) => ({ recordId: record.recordId, stickerPath: record.stickerPath, displayOrder: index })),
-      monthlyJointCompletedDays: database.dailySnapshots.filter((snapshot) => snapshot.moduleId === selectedModule.moduleId
-        && snapshot.recordDate.startsWith(month) && snapshot.isAllCompleted).length,
-      monthlyReceivedReactionCount: monthlyReactions.length,
-      mostUsedEmoji: emoji,
+      items: cardRecords.map((record, index) => ({
+        recordId: record.recordId,
+        moduleId: record.moduleId,
+        recordDate: record.recordDate,
+        stickerPath: record.stickerPath,
+        displayOrder: index,
+      })),
+      footprint: [...countByDate.entries()].map(([date, recordCount]) => ({
+        date,
+        recordCount,
+        level: Math.min(4, recordCount),
+        ...(featured?.recordDate === date ? { stickerPath: featured.stickerPath } : {}),
+      })),
+      monthlyJointCompletedDays: reportMode === 'month' ? currentJoint : 0,
+      monthlyReceivedReactionCount: reportMode === 'month' ? received.length : 0,
+      mostUsedEmoji: mostUsedCode ? REACTION_EMOJIS[mostUsedCode] : '—',
+      ...(latestRecord?.stickerPath
+        ? { latestStickerPath: latestRecord.generatedStickerPath ?? latestRecord.stickerPath }
+        : {}),
     };
   });
+}
+
+function localMemoryRange(reportMode: MemoryReportMode, period: string, today: string): {
+  key: string;
+  start: string;
+  end: string;
+  endExclusive: string;
+  previousStart: string;
+  isCurrent: boolean;
+} {
+  if (reportMode === 'month') {
+    const key = /^\d{4}-\d{2}$/.test(period) ? period : today.slice(0, 7);
+    const start = `${key}-01`;
+    const endExclusive = localShiftMonth(key, 1);
+    return {
+      key,
+      start,
+      end: addDays(endExclusive, -1),
+      endExclusive,
+      previousStart: localShiftMonth(key, -1),
+      isCurrent: key === today.slice(0, 7),
+    };
+  }
+  const key = localWeekStart(/^\d{4}-\d{2}-\d{2}$/.test(period) ? period : today);
+  const endExclusive = addDays(key, 7);
+  return {
+    key,
+    start: key,
+    end: addDays(endExclusive, -1),
+    endExclusive,
+    previousStart: addDays(key, -7),
+    isCurrent: key === localWeekStart(today),
+  };
+}
+
+function localShiftMonth(month: string, amount: number): string {
+  const [year, value] = month.split('-').map(Number);
+  return new Date(Date.UTC(year, value - 1 + amount, 1)).toISOString().slice(0, 10);
+}
+
+function localWeekStart(date: string): string {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  const weekday = parsed.getUTCDay() || 7;
+  parsed.setUTCDate(parsed.getUTCDate() - weekday + 1);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function longestMemoryStreak(dates: Set<string>): number {
+  let longest = 0;
+  let current = 0;
+  let previous = '';
+  [...dates].sort().forEach((date) => {
+    current = previous && addDays(previous, 1) === date ? current + 1 : 1;
+    longest = Math.max(longest, current);
+    previous = date;
+  });
+  return longest;
+}
+
+function calculateTrailingMemoryStreak(dates: Set<string>, end: string): number {
+  let cursor = dates.has(end) ? end : addDays(end, -1);
+  let streak = 0;
+  while (dates.has(cursor)) {
+    streak += 1;
+    cursor = addDays(cursor, -1);
+  }
+  return streak;
 }
 
 export interface PrivacyView {

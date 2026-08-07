@@ -4,7 +4,7 @@
   <scroll-view class="beta-scroll content-layer" scroll-y enhanced show-scrollbar="{{false}}"><view class="beta-body invite-body">
     <view wx:if="{{loading}}" class="beta-loading">正在生成邀请...</view>
     <view wx:elif="{{preview}}" class="invite-preview beta-glass">
-      <image class="invite-illustration" src="/assets/ui/invite-paper-bag.webp" mode="aspectFit" webp />
+      <image class="invite-illustration" src="/subpackages/assets/ui/invite-paper-bag.png" mode="aspectFit" />
       <text class="invite-module-name">{{preview.module.name}}</text>
       <text class="invite-description">{{preview.module.description || '一起认真记录生活里的小事'}}</text>
       <view class="inviter-line"><view class="beta-avatar" style="background:{{preview.inviter.avatarColor}};"><image wx:if="{{preview.inviter.avatarUrl}}" src="{{preview.inviter.avatarUrl}}" mode="aspectFill" /><text wx:else>{{preview.inviter.avatarText}}</text></view><view><text>{{preview.inviter.nickname}}</text><text>邀请你一起记录</text></view></view>

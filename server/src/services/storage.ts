@@ -2,6 +2,7 @@ import COS from 'cos-nodejs-sdk-v5';
 import sharp from 'sharp';
 import type { AppConfig } from '../config';
 import { AppError } from '../lib/errors';
+import { isoWithShanghaiOffset } from '../lib/time';
 
 interface TemporaryCredentials {
   TmpSecretId: string;
@@ -48,7 +49,7 @@ export class StorageService {
     return {
       method: 'CLOUD',
       cloudPath: objectKey,
-      expireAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      expireAt: isoWithShanghaiOffset(new Date(Date.now() + 10 * 60 * 1000)),
     };
   }
 

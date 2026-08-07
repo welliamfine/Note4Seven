@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { beijingDate, beijingIso } from './lib/time.mjs';
 import { archiveEntries, createZip } from './lib/zip.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -14,7 +15,7 @@ const shortCommit = commit.slice(0, 12);
 const dirty = git(['status', '--porcelain']);
 if (dirty) throw new Error('Release builds require a clean Git work tree. Commit or stash changes first.');
 const suppliedRelease = argument('release-id');
-const today = new Date().toISOString().slice(0, 10).replaceAll('-', '.');
+const today = beijingDate().replaceAll('-', '.');
 const releaseId = suppliedRelease ?? `${today}-rc.2+${shortCommit}`;
 if (!/^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[a-z0-9.-]+\+[a-f0-9]{7,12}$/i.test(releaseId)) {
   throw new Error('Release ID must look like 2026.07.25-rc.2+<git-short-sha>.');
@@ -88,7 +89,7 @@ const manifest = {
   releaseId,
   gitCommit: commit,
   gitTag: `release-${releaseId}`,
-  createdAt: new Date().toISOString(),
+  createdAt: beijingIso(),
   build: { node: process.version, npm: npmVersion(), platform: `${process.platform}-${process.arch}` },
   versions: { miniprogram: packageManifest.version, backend: '0.1.0', cosMediaTrigger: '1.0.0' },
   migrations,

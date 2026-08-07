@@ -91,7 +91,7 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
             ON n.target_type = 'join_application' AND ja.application_id = n.target_id
           LEFT JOIN makeup_approval ma
             ON n.target_type = 'makeup_approval' AND ma.approval_id = n.target_id
-           SET n.is_read = 1, n.read_at = UTC_TIMESTAMP(3), n.updated_at = UTC_TIMESTAMP(3)
+           SET n.is_read = 1, n.read_at = CURRENT_TIMESTAMP(3), n.updated_at = CURRENT_TIMESTAMP(3)
          WHERE n.user_id = ? AND n.is_read = 0
            AND NOT (n.action_status = 'actionable' AND (
              (n.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')
@@ -109,7 +109,7 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
             ON i.target_type = 'join_application' AND ja.application_id = i.target_id
           LEFT JOIN makeup_approval ma
             ON i.target_type = 'makeup_approval' AND ma.approval_id = i.target_id
-           SET i.status = 'read', i.updated_at = UTC_TIMESTAMP(3)
+           SET i.status = 'read', i.updated_at = CURRENT_TIMESTAMP(3)
          WHERE n.user_id = ? AND i.recipient_user_id = ? AND i.status = 'unread'
            AND NOT (i.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')
            AND NOT (i.target_type = 'makeup_approval' AND COALESCE(ma.status, 'pending') = 'pending')`,
@@ -131,7 +131,7 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
             ON n.target_type = 'join_application' AND ja.application_id = n.target_id
           LEFT JOIN makeup_approval ma
             ON n.target_type = 'makeup_approval' AND ma.approval_id = n.target_id
-           SET n.is_read = 1, n.read_at = COALESCE(n.read_at, UTC_TIMESTAMP(3)), n.updated_at = UTC_TIMESTAMP(3)
+           SET n.is_read = 1, n.read_at = COALESCE(n.read_at, CURRENT_TIMESTAMP(3)), n.updated_at = CURRENT_TIMESTAMP(3)
          WHERE n.notification_id = ? AND n.user_id = ?
            AND NOT (n.action_status = 'actionable' AND (
              (n.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')
@@ -155,7 +155,7 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
             ON i.target_type = 'join_application' AND ja.application_id = i.target_id
           LEFT JOIN makeup_approval ma
             ON i.target_type = 'makeup_approval' AND ma.approval_id = i.target_id
-           SET i.status = 'read', i.updated_at = UTC_TIMESTAMP(3)
+           SET i.status = 'read', i.updated_at = CURRENT_TIMESTAMP(3)
          WHERE n.notification_id = ? AND n.user_id = ? AND i.recipient_user_id = ?
            AND i.status = 'unread'
            AND NOT (i.target_type = 'join_application' AND COALESCE(ja.status, 'pending') = 'pending')
@@ -192,8 +192,8 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
     const result = await idempotent(pool, user.userId, 'privacy_consent', body.clientRequestId, body, async (connection) => {
       await connection.execute(
         `INSERT INTO privacy_consent (user_id, privacy_version, agreed_at, revoked_at)
-         VALUES (?, ?, UTC_TIMESTAMP(3), ?)
-         ON DUPLICATE KEY UPDATE agreed_at = UTC_TIMESTAMP(3), revoked_at = VALUES(revoked_at)`,
+         VALUES (?, ?, CURRENT_TIMESTAMP(3), ?)
+         ON DUPLICATE KEY UPDATE agreed_at = CURRENT_TIMESTAMP(3), revoked_at = VALUES(revoked_at)`,
         [user.userId, body.privacyVersion, body.agreed ? null : new Date()],
       );
       return { privacyVersion: body.privacyVersion, agreed: body.agreed };
@@ -226,7 +226,7 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
       );
       await connection.execute(`UPDATE user_account SET status = 'deletion_pending', version = version + 1 WHERE user_id = ?`, [user.userId]);
       await connection.execute(
-        `UPDATE auth_session SET revoked_at = UTC_TIMESTAMP(3) WHERE user_id = ? AND session_id <> ? AND revoked_at IS NULL`,
+        `UPDATE auth_session SET revoked_at = CURRENT_TIMESTAMP(3) WHERE user_id = ? AND session_id <> ? AND revoked_at IS NULL`,
         [user.userId, user.sessionId],
       );
       return {
@@ -245,8 +245,8 @@ export function accountRoutes(pool: Pool, config: AppConfig): Router {
     const result = await idempotent(pool, user.userId, 'account_deletion_cancel', body.clientRequestId, body, async (connection) => {
       const [update] = await connection.execute<ResultSetHeader>(
         `UPDATE account_deletion_request
-            SET status = 'cancelled', cancelled_at = UTC_TIMESTAMP(3)
-          WHERE user_id = ? AND status = 'cooling_off' AND execute_after > UTC_TIMESTAMP(3)`,
+            SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP(3)
+          WHERE user_id = ? AND status = 'cooling_off' AND execute_after > CURRENT_TIMESTAMP(3)`,
         [user.userId],
       );
       if (update.affectedRows !== 1) throw new AppError('DELETION_CANCEL_NOT_ALLOWED', '注销申请已无法撤销', 409);

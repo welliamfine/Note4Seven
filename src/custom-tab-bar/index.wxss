@@ -8,15 +8,15 @@
 }
 
 .tab-pill {
-  height: 104rpx;
+  height: 124rpx;
   margin: 0 32rpx 20rpx;
   padding: 8rpx 20rpx;
   box-sizing: border-box;
   display: flex;
   align-items: stretch;
   border: 0;
-  border-radius: 52rpx;
-  background: rgba(255, 255, 255, 0.05);
+  border-radius: 62rpx;
+  background: rgba(255, 255, 255, 0.4);
   box-shadow:
     inset 0 15px 30px rgba(255, 255, 255, 0.2),
     inset 0 0 15px rgba(255, 255, 255, 0.2),
@@ -32,7 +32,7 @@
   min-width: 0;
   height: 100%;
   margin: 0;
-  padding: 10rpx 0 6rpx;
+  padding: 8rpx 0 6rpx;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -47,22 +47,36 @@
 
 .tab-icon-wrap {
   position: relative;
-  width: 36rpx;
-  height: 36rpx;
-  flex: 0 0 36rpx;
+  width: 58rpx;
+  height: 58rpx;
+  flex: 0 0 58rpx;
 }
 
-.tab-item image {
-  display: block;
-  width: 100%;
-  height: 100%;
-  opacity: 0.78;
+.tab-icon-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
 }
+
+.tab-item .tab-icon-sprite {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 232rpx;
+  max-width: none;
+  height: 116rpx;
+}
+
+.tab-item .tab-icon-sprite-1 { left: -58rpx; }
+.tab-item .tab-icon-sprite-2 { left: -116rpx; }
+.tab-item .tab-icon-sprite-3 { left: -174rpx; }
+.tab-item .tab-icon-sprite-selected { top: -58rpx; }
 
 .tab-item .tab-unread-dot {
   position: absolute;
-  top: -5rpx;
-  right: -7rpx;
+  top: -3rpx;
+  right: -5rpx;
   width: 13rpx;
   height: 13rpx;
   margin: 0;
@@ -73,12 +87,7 @@
 }
 
 .tab-item text {
-  margin-top: 5rpx;
+  margin-top: 6rpx;
 }
 
 .tab-active { color: #dfa8a5; }
-
-.tab-active image {
-  opacity: 0.42;
-  filter: sepia(1) saturate(1.2) hue-rotate(305deg);
-}

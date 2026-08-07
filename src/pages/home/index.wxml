@@ -3,7 +3,7 @@
 <view class="page-shell home {{managing ? 'home-managing' : ''}}">
   <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
   <view class="home-top" style="padding-top: {{statusBarHeight}}px;">
-    <view class="home-brand"><text class="brand-script">Note4Seven</text><text>七日记</text></view>
+    <view class="home-brand"><text class="brand-script">Note4Seven</text></view>
     <view wx:if="{{!loading && pinnedModules.length + normalModules.length && !homeMotionActive}}" class="manage-pill" bindtap="toggleManage" hover-class="control-pressed" hover-stay-time="80" role="button">{{managing ? '完成' : '管理'}}</view>
   </view>
 
@@ -14,7 +14,7 @@
   </view>
 
   <view wx:elif="{{pinnedModules.length + normalModules.length === 0}}" class="empty-home">
-    <view class="empty-sticker"><view class="sticker-pop-wrapper {{homeStickerPhase}}"><image class="sticker-outline-medium" src="/assets/ui/empty-journal.webp" mode="aspectFit" webp /></view></view>
+    <view class="empty-sticker"><view class="sticker-pop-wrapper {{homeStickerPhase}}"><image class="sticker-outline-medium" src="/assets/ui/empty-journal.png" mode="aspectFit" /></view></view>
     <text class="empty-title">开始记录吧~</text>
     <button class="primary-button empty-button" data-source="empty_primary" bindtap="openCreate">创建第一个记录</button>
   </view>
@@ -28,7 +28,7 @@
       <view class="group-list {{pinnedExpanded ? '' : 'group-list-collapsed'}} {{pinnedExpanding ? 'group-list-opening' : ''}} {{pinnedCollapsing ? 'group-list-closing' : ''}}" style="height: {{pinnedExpanded ? pinnedModules.length * 254 : 266}}rpx; --group-motion-duration: {{homeGroupMotionDuration}}ms; --group-opening-duration: {{homeGroupOpeningDuration}}ms; --group-card-opening-duration: {{homeGroupCardOpeningDuration}}ms;">
         <view class="module-card collapse-order-{{index < 3 ? index : 'overflow'}} {{item.selected ? 'module-selected' : ''}} {{pinPopoverModuleId === item.moduleId ? 'pin-popover-open' : ''}} {{item.motionPhase ? 'home-card-' + item.motionPhase : ''}} {{pinLayoutPhase && item.pinShiftActive ? 'pin-layout-' + pinLayoutPhase : ''}}" style="--collapse-y: {{index === 0 ? 0 : (index === 1 ? -238 : 30 - index * 254)}}rpx; --expand-delay: {{(index < homeGroupOpeningMaxStaggerSteps ? index : homeGroupOpeningMaxStaggerSteps) * homeGroupOpeningStaggerStep}}ms; --pin-leave-duration: {{pinLeaveDuration}}ms; --pin-layout-duration: {{pinLayoutDuration}}ms; --pin-enter-duration: {{pinEnterDuration}}ms; --pin-layout-y: {{item.pinShiftOffsetRpx}}rpx;" wx:for="{{pinnedModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" data-pinned="true" bindlongpress="onModuleLongPress" bindtouchstart="onCardTouchStart" bindtouchend="onCardTouchEnd" bindtouchcancel="onCardTouchCancel">
           <view wx:if="{{managing}}" class="module-select {{item.selected ? 'module-select-checked' : ''}}" data-id="{{item.moduleId}}" catchtap="onModuleSelectionTap" role="checkbox" aria-checked="{{item.selected}}"><text wx:if="{{item.selected}}">✓</text></view>
-          <view class="module-card-content" data-id="{{item.moduleId}}" bindtap="openModule">
+          <view class="module-card-content" data-id="{{item.moduleId}}" data-pinned="true" bindtap="openModule">
             <view class="card-copy">
               <view class="module-name-row"><text class="module-name">{{item.name}}</text><text wx:if="{{item.unreadInboxCount > 0}}" class="module-unread-dot"></text></view>
               <view class="avatar-stack">
@@ -55,7 +55,7 @@
       <view class="group-list {{normalExpanded ? '' : 'group-list-collapsed'}} {{normalExpanding ? 'group-list-opening' : ''}} {{normalCollapsing ? 'group-list-closing' : ''}}" style="height: {{normalExpanded ? normalModules.length * 254 : 266}}rpx; --group-motion-duration: {{homeGroupMotionDuration}}ms; --group-opening-duration: {{homeGroupOpeningDuration}}ms; --group-card-opening-duration: {{homeGroupCardOpeningDuration}}ms;">
         <view class="module-card collapse-order-{{index < 3 ? index : 'overflow'}} {{item.selected ? 'module-selected' : ''}} {{pinPopoverModuleId === item.moduleId ? 'pin-popover-open' : ''}} {{item.motionPhase ? 'home-card-' + item.motionPhase : ''}} {{pinLayoutPhase && item.pinShiftActive ? 'pin-layout-' + pinLayoutPhase : ''}}" style="--collapse-y: {{index === 0 ? 0 : (index === 1 ? -238 : 30 - index * 254)}}rpx; --expand-delay: {{(index < homeGroupOpeningMaxStaggerSteps ? index : homeGroupOpeningMaxStaggerSteps) * homeGroupOpeningStaggerStep}}ms; --pin-leave-duration: {{pinLeaveDuration}}ms; --pin-layout-duration: {{pinLayoutDuration}}ms; --pin-enter-duration: {{pinEnterDuration}}ms; --pin-layout-y: {{item.pinShiftOffsetRpx}}rpx;" wx:for="{{normalModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" data-pinned="false" bindlongpress="onModuleLongPress" bindtouchstart="onCardTouchStart" bindtouchend="onCardTouchEnd" bindtouchcancel="onCardTouchCancel">
           <view wx:if="{{managing}}" class="module-select {{item.selected ? 'module-select-checked' : ''}}" data-id="{{item.moduleId}}" catchtap="onModuleSelectionTap" role="checkbox" aria-checked="{{item.selected}}"><text wx:if="{{item.selected}}">✓</text></view>
-          <view class="module-card-content" data-id="{{item.moduleId}}" bindtap="openModule">
+          <view class="module-card-content" data-id="{{item.moduleId}}" data-pinned="false" bindtap="openModule">
             <view class="card-copy">
               <view class="module-name-row"><text class="module-name">{{item.name}}</text><text wx:if="{{item.unreadInboxCount > 0}}" class="module-unread-dot"></text></view>
               <view class="avatar-stack">
@@ -78,28 +78,31 @@
   </scroll-view>
 </view>
 
-  <view wx:if="{{!loading && pinnedModules.length + normalModules.length > 0 && !managing && !homeMotionActive}}" class="floating-add" data-source="floating" bindtap="openCreate" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="创建记录模块"><image src="/assets/ui/icons/plus.svg" /></view>
+  <view wx:if="{{!loading && pinnedModules.length + normalModules.length > 0 && !managing && !homeMotionActive}}" class="floating-add" data-source="floating" bindtap="openCreate" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="创建记录模块"><view class="home-state-icon"><image class="home-state-icon-sprite" src="/assets/ui/custom-icons/home-add.png" mode="scaleToFill" /></view></view>
 
   <view wx:if="{{managing && !homeMotionActive}}" class="manage-toolbar">
     <button class="manage-delete" disabled="{{!selectedModuleIds.length || removingModules}}" loading="{{removingModules}}" bindtap="removeSelectedModules" aria-label="删除已选择模块"><image src="/assets/ui/icons/trash-2.svg" />删除</button>
   </view>
 
   <view wx:if="{{createOpen}}" class="overlay sheet-motion-overlay {{createClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeCreate">
-    <view class="create-sheet safe-bottom sheet-motion-panel {{createClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation">
+    <view class="create-sheet glass-sheet safe-bottom sheet-motion-panel {{createClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation">
       <view class="sheet-handle"></view>
       <view class="sheet-heading"><text class="sheet-title">创建记录模块</text><view class="close-button" bindtap="closeCreate" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="关闭"><image src="/assets/ui/icons/x.svg" /></view></view>
       <scroll-view scroll-y class="create-content">
-        <input class="text-input" maxlength="10" value="{{createName}}" placeholder="模块名称" placeholder-class="text-placeholder" bindinput="onNameInput" />
+        <input class="text-input" maxlength="-1" value="{{createName}}" placeholder="模块名称" placeholder-class="text-placeholder" bindinput="onNameInput" />
         <textarea class="description-input" maxlength="200" value="{{createDescription}}" placeholder="介绍一下！" placeholder-class="text-placeholder" auto-height bindinput="onDescriptionInput" />
-        <view class="record-policy-heading"><text>记录模式</text><text>创建后不可修改</text></view>
+        <view class="record-policy-heading">
+          <text>模式选择</text>
+          <view class="record-policy-help" bindtap="showRecordPolicyHelp" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="查看模式说明"><image src="/assets/ui/icons/circle-alert.svg" /></view>
+        </view>
         <view class="record-policy-options">
-          <view class="record-policy-option {{createRecordPolicy === 'strict' ? 'record-policy-selected' : ''}}" data-policy="strict" bindtap="chooseRecordPolicy" hover-class="control-pressed" hover-stay-time="80" role="radio" aria-checked="{{createRecordPolicy === 'strict'}}">
-            <view class="record-policy-radio"><text></text></view>
-            <view><text class="record-policy-title">严厉模式</text><text class="record-policy-copy">当天直接记录；过去 3 天可补卡，多人模块需要审批。历史记录不可修改或删除。</text></view>
-          </view>
           <view class="record-policy-option {{createRecordPolicy === 'relaxed' ? 'record-policy-selected' : ''}}" data-policy="relaxed" bindtap="chooseRecordPolicy" hover-class="control-pressed" hover-stay-time="80" role="radio" aria-checked="{{createRecordPolicy === 'relaxed'}}">
-            <view class="record-policy-radio"><text></text></view>
-            <view><text class="record-policy-title">轻松模式</text><text class="record-policy-copy">纯记录，无需审批。可记录、编辑或删除 1900-01-01 至 2099-12-31 内任意日期。</text></view>
+            <view class="home-state-icon"><image class="home-state-icon-sprite" src="/assets/ui/custom-icons/mode-record.png" mode="scaleToFill" /></view>
+            <text class="record-policy-title">记录模式</text>
+          </view>
+          <view class="record-policy-option {{createRecordPolicy === 'strict' ? 'record-policy-selected' : ''}}" data-policy="strict" bindtap="chooseRecordPolicy" hover-class="control-pressed" hover-stay-time="80" role="radio" aria-checked="{{createRecordPolicy === 'strict'}}">
+            <view class="home-state-icon"><image class="home-state-icon-sprite" src="/assets/ui/custom-icons/mode-checkin.png" mode="scaleToFill" /></view>
+            <text class="record-policy-title">打卡模式</text>
           </view>
         </view>
         <view class="template-heading"><text>从模板开始</text></view>
@@ -110,42 +113,150 @@
       </scroll-view>
       <button class="primary-button bottom-action-button create-submit" disabled="{{createSubmitting || !createRecordPolicy}}" loading="{{createSubmitting}}" bindtap="submitCreate">完成创建</button>
     </view>
+    <view wx:if="{{recordPolicyHelpOpen}}" class="overlay record-policy-help-overlay sheet-motion-overlay {{recordPolicyHelpClosing ? 'sheet-motion-closing' : ''}}" catchtap="hideRecordPolicyHelp">
+      <view class="record-policy-help-sheet glass-sheet safe-bottom sheet-motion-panel {{recordPolicyHelpClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation" role="dialog" aria-label="模式说明">
+        <view class="sheet-handle"></view>
+        <view class="sheet-heading"><text class="sheet-title">模式说明</text><view class="close-button" bindtap="hideRecordPolicyHelp" hover-class="control-pressed" hover-stay-time="80" role="button" aria-label="关闭模式说明"><image src="/assets/ui/icons/x.svg" /></view></view>
+        <view class="record-policy-help-content">
+          <view class="record-policy-help-row"><text class="record-policy-help-name">记录模式</text><text class="record-policy-help-copy">过去或未来日期都能直接记录（支持 1900 至 2099 年）；自己的记录可以编辑或删除。</text></view>
+          <view class="record-policy-help-row"><text class="record-policy-help-name">打卡模式</text><text class="record-policy-help-copy">当天直接打卡，仅可补卡最近 3 天；多人模块补卡需要审批，历史打卡不可编辑或删除。</text></view>
+        </view>
+        <text class="record-policy-help-warning">选定并创建后不可更改，请确认后再创建。</text>
+        <button class="primary-button record-policy-help-confirm" bindtap="hideRecordPolicyHelp">我知道了</button>
+      </view>
+    </view>
   </view>
   </swiper-item>
 
   <swiper-item class="primary-swiper-item">
-    <scroll-view class="primary-scroll" scroll-y enhanced show-scrollbar="{{false}}">
-      <view class="page-shell memory-page">
-        <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
-        <view class="page-title content-layer">回忆</view>
-        <view class="memory-content content-layer">
-          <view class="weekly-card">
-            <text class="card-kicker">本周概览</text>
-            <view class="weekly-grid">
-              <view><text class="metric-value">{{memoryRecordedDays}}</text><text class="metric-label">记录天数</text></view>
-              <view><text class="metric-value">{{memoryModuleCount}}</text><text class="metric-label">参与模块</text></view>
-              <view><text class="metric-value">{{memoryWeeklyJointCompleted}}</text><text class="metric-label">共同完成</text></view>
-              <view><text class="metric-value">{{memoryStreakDays}}</text><text class="metric-label">连续天数</text></view>
-              <view><text class="metric-value">{{memoryWeeklyReceivedReactions}}</text><text class="metric-label">收到回应</text></view>
-              <view><text class="metric-value">{{memoryRecordCount}}</text><text class="metric-label">本周记录</text></view>
-            </view>
-          </view>
-          <view class="record-card">
-            <view class="record-heading">
-              <view bindtap="openMemorySelection"><text class="record-word">RECORD</text><text class="record-month">{{memorySelectedModuleName || '本月记录'}} · {{memoryMonthLabel}}</text></view>
-              <button bindtap="changeMemoryGroup" disabled="{{memoryChangingGroup}}" loading="{{memoryChangingGroup}}">{{memoryChangingGroup ? '' : '换一组'}}</button>
-            </view>
-            <view class="memory-grid">
-              <view class="memory-cell" wx:for="{{memoryStickers}}" wx:key="id"><view class="sticker-pop-wrapper {{memoryStickerPhase}}" style="animation-delay: {{memoryStickerPhase === 'sticker-entering' ? item.popDelay : 0}}ms;"><image class="sticker-outline-medium" src="{{item.path}}" mode="aspectFit" webp /></view></view>
-              <view wx:if="{{!memoryStickers.length}}" class="memory-empty">这个月还没有贴纸</view>
-            </view>
-            <text class="record-summary">共同完成 {{memoryJointCompleted}} 天　·　收到回应 {{memoryReceivedReactions}} 次　·　最常 {{memoryMostUsedEmoji}}</text>
-            <button class="save-button" loading="{{memoryExporting}}" bindtap="saveMemoryCard">保存到相册</button>
-            <canvas canvas-id="memoryExportCanvas" class="export-canvas"></canvas>
+    <view class="page-shell memory-page">
+      <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
+      <view class="memory-fixed-header content-layer" style="padding-top: {{statusBarHeight}}px;">
+        <view class="memory-header">
+          <text class="page-title">回忆</text>
+          <view class="report-segment" role="tablist">
+            <view class="report-segment-thumb {{memoryReportTabMode === 'month' ? 'is-month' : ''}}" aria-hidden="true"></view>
+            <view class="report-tab {{memoryReportTabMode === 'week' ? 'selected' : ''}}" data-mode="week" bindtap="setMemoryReportMode" role="tab" aria-selected="{{memoryReportTabMode === 'week'}}">周报</view>
+            <view class="report-tab {{memoryReportTabMode === 'month' ? 'selected' : ''}}" data-mode="month" bindtap="setMemoryReportMode" role="tab" aria-selected="{{memoryReportTabMode === 'month'}}">月报</view>
           </view>
         </view>
+
       </view>
-    </scroll-view>
+      <scroll-view class="primary-scroll memory-scroll content-layer" style="margin-top: calc({{statusBarHeight}}px + 142rpx); height: calc(100vh - {{statusBarHeight}}px - 142rpx);" scroll-y enhanced show-scrollbar="{{false}}">
+        <view class="memory-content content-layer">
+          <view wx:if="{{memoryLoading && !memorySummaryTitle}}" class="memory-loading memory-glass">
+            <view class="loading-line loading-line-wide"></view>
+            <view class="loading-line"></view>
+            <view class="loading-line loading-line-short"></view>
+          </view>
+
+          <view wx:elif="{{memoryErrorMessage && !memorySummaryTitle}}" class="memory-error memory-glass">
+            <text>{{memoryErrorMessage}}</text>
+            <button bindtap="retryMemoryLoad">重新加载</button>
+          </view>
+
+          <block wx:else>
+            <view class="summary-card memory-glass">
+              <view class="summary-copy">
+                <text class="summary-meta {{memorySummaryMetaMotionClass}}">{{memoryPeriodLabel}} · {{memoryStatusLabel}}</text>
+                <view class="summary-title"><text>这一</text><text class="summary-title-changing {{memorySummaryPeriodMotionClass}}">{{memoryReportMode === 'month' ? '月' : '周'}}</text><text>，你生产了</text><text class="summary-title-changing summary-count {{memorySummaryCountMotionClass}}">{{memoryMomentCount}}</text><text>张贴纸！</text></view>
+                <view class="summary-action {{memorySummaryActionMotionClass}}" bindtap="showFullMemoryReport" role="button">{{memoryReportActionLabel}}　›</view>
+              </view>
+              <view class="summary-sticker">
+                <view class="sticker-pop-wrapper {{memorySummaryStickerPhase}}">
+                  <image class="summary-sticker-image sticker-outline-medium" src="{{memoryLatestStickerPath || '/assets/ui/memory-default-sticker.png'}}" mode="aspectFit" webp />
+                </view>
+              </view>
+            </view>
+
+            <view wx:if="{{memoryHasData}}" class="core-metrics">
+              <view class="metric-bubble memory-glass" wx:for="{{memoryMetrics}}" wx:key="label">
+                <view class="metric-number-row"><text class="metric-number {{memoryMetricValueMotionClasses[index]}}">{{item.value}}</text><text class="metric-unit">{{item.unit}}</text></view>
+                <text class="metric-name">{{item.label}}</text>
+              </view>
+            </view>
+            <view wx:else class="memory-milestone memory-glass">
+              <text class="milestone-kicker">第一枚回忆</text>
+              <text class="milestone-copy">下一次打卡完成后，会在这里留下阶段足迹</text>
+            </view>
+
+            <view class="memory-section collage-section">
+              <view class="section-heading">
+                <text class="section-title">回忆拼贴</text>
+                <view class="section-actions {{memoryCollageActionPhase}}">
+                  <view class="scope-chip selected" bindtap="openMemorySelection" role="button"><text class="scope-label">{{memoryScopeLabel}}</text><image class="scope-chevron" src="/assets/ui/icons/chevron-down.svg" /></view>
+                  <view class="change-button {{memoryCollageActionPhase}} {{memoryChangingGroup || !memoryStickers.length ? 'control-disabled' : ''}}" bindtap="changeMemoryGroup" role="button" aria-disabled="{{memoryChangingGroup || !memoryStickers.length || memoryCollageActionPhase !== 'action-visible'}}">{{memoryChangingGroup ? '更换中' : '换一组'}}</view>
+                </view>
+              </view>
+              <view class="collage-board {{memoryHasSavedCollage ? 'has-saved-collage' : 'has-generated-collage'}} {{memoryBoardPhase}}">
+                <block wx:if="{{memoryHasSavedCollage}}">
+                  <view class="saved-collage-preview {{memorySavedCollageBoardPath ? 'has-board-background' : 'has-fallback-background'}}">
+                    <image wx:if="{{memorySavedCollageBoardPath}}" class="saved-collage-board-background" src="{{memorySavedCollageBoardPath}}" mode="scaleToFill" style="{{memoryCollageBoardBackgroundStyle}}" aria-hidden="true" />
+                    <view wx:else class="saved-collage-default-board" aria-hidden="true">
+                      <image src="/assets/ui/memory-collage-board.webp" mode="scaleToFill" webp />
+                    </view>
+                    <view class="saved-collage-item" wx:for="{{memorySavedCollageItems}}" wx:for-item="collageItem" wx:key="itemId" style="{{collageItem.style}}">
+                      <image class="sticker-outline-medium" src="{{collageItem.imagePath}}" mode="aspectFit" webp />
+                    </view>
+                  </view>
+                </block>
+                <block wx:else>
+                  <image class="collage-board-background" src="/assets/ui/memory-collage-board.webp" mode="scaleToFill" webp />
+                  <view class="collage-stickers">
+                    <view class="collage-sticker {{item.positionClass}}" wx:for="{{memoryStickers}}" wx:key="id">
+                      <view class="sticker-pop-wrapper {{memoryStickerPhase}}" style="animation-delay: {{memoryStickerPhase === 'sticker-entering' ? item.popDelay : 0}}ms;">
+                        <image class="sticker-outline-medium" src="{{item.path}}" mode="aspectFit" webp />
+                      </view>
+                    </view>
+                  </view>
+                  <text wx:if="{{!memoryStickers.length}}" class="collage-empty">这一周期还没有可拼贴的记录</text>
+                </block>
+              </view>
+              <view class="save-memory-slot">
+                <button class="save-memory-button" bindtap="openMemoryCollageEditor">编辑</button>
+              </view>
+            </view>
+
+            <view class="memory-section footprint-section">
+              <view class="section-heading footprint-heading">
+                <text class="section-title">{{memoryReportMode === 'month' ? '本月足迹' : '本周足迹'}}</text>
+                <view class="scope-chip" bindtap="openMemorySelection" role="button"><text class="scope-label">{{memoryScopeLabel}}</text></view>
+              </view>
+
+              <view wx:if="{{!memoryHasData}}" class="footprint-empty memory-glass {{memoryHeatmapPhase}}">
+                <text>有记录后，足迹会按日期自动点亮</text>
+              </view>
+
+              <view wx:elif="{{memoryReportMode === 'month'}}" class="month-footprint memory-glass {{memoryHeatmapPhase}}">
+                <view class="weekday-row">
+                  <text>周日</text><text>周一</text><text>周二</text><text>周三</text><text>周四</text><text>周五</text><text>周六</text>
+                </view>
+                <view class="month-grid">
+                  <view class="heat-cell heat-level-{{item.level}} {{!item.inMonth ? 'outside' : ''}} {{item.future ? 'future' : ''}}" wx:for="{{memoryCalendarCells}}" wx:key="date" aria-label="{{item.ariaLabel}}">
+                    <text>{{item.inMonth ? item.day : ''}}</text>
+                  </view>
+                </view>
+              </view>
+
+              <view wx:else class="week-footprint memory-glass {{memoryHeatmapPhase}}">
+                <text class="activity-summary">{{memoryActivitySummary}}</text>
+                <view class="week-activity-row">
+                  <view class="week-activity heat-level-{{item.level}}" wx:for="{{memoryWeekCells}}" wx:key="date">
+                    <text class="week-day">{{item.weekday}}</text>
+                    <text class="week-count">{{item.countLabel}}</text>
+                  </view>
+                </view>
+                <text wx:if="{{memoryTimeSummary}}" class="time-summary">{{memoryTimeSummary}}</text>
+              </view>
+            </view>
+
+          </block>
+
+          <view class="bottom-clearance"></view>
+        </view>
+      </scroll-view>
+      <canvas canvas-id="memoryExportCanvas" class="export-canvas"></canvas>
+    </view>
   </swiper-item>
 
   <swiper-item class="primary-swiper-item">
@@ -153,7 +264,7 @@
       <view class="page-shell discover-page">
         <image class="page-texture" src="/assets/ui/material-texture.jpg" mode="aspectFill" aria-hidden="true" />
         <view class="discover-empty content-layer">
-          <view class="discover-icon"><image src="/assets/ui/icons/compass.svg" /></view>
+          <view class="discover-icon"><view class="discover-icon-clip"><image class="discover-icon-sprite" src="/assets/ui/custom-icons/tab-sprite.png" mode="scaleToFill" /></view></view>
           <text class="discover-title">更多记录灵感即将上线</text>
         </view>
       </view>
@@ -171,15 +282,36 @@
             <view class="identity-copy"><text class="nickname">{{profileUser.nickname}}</text><text class="summary">已记录 {{profileRecordedDays}} 天 · {{profileModuleCount}} 个模块</text></view><image class="profile-edit-icon" src="/assets/ui/icons/settings-2.svg" />
           </view>
           <view class="profile-menu">
-            <button bindtap="openNotifications"><image src="/assets/ui/icons/bell.svg" /><text>通知中心</text><text wx:if="{{profileUnreadCount}}" class="badge">{{profileUnreadCount}}</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
-            <button bindtap="openPrivacy"><image src="/assets/ui/icons/shield.svg" /><text>隐私与数据说明</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
-            <button bindtap="openRecycleBin"><image src="/assets/ui/icons/archive-restore.svg" /><text>模块回收站</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
+            <button bindtap="openNotifications" hover-class="profile-menu-selected" hover-stay-time="80"><view class="profile-state-icon"><image class="profile-state-icon-sprite" src="/assets/ui/custom-icons/profile-notifications.png" mode="scaleToFill" /></view><text>通知中心</text><text wx:if="{{profileUnreadCount}}" class="badge">{{profileUnreadCount}}</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
+            <button bindtap="openPrivacy" hover-class="profile-menu-selected" hover-stay-time="80"><view class="profile-state-icon"><image class="profile-state-icon-sprite" src="/assets/ui/custom-icons/profile-privacy.png" mode="scaleToFill" /></view><text>隐私与数据说明</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
+            <button bindtap="openRecycleBin" hover-class="profile-menu-selected" hover-stay-time="80"><view class="profile-state-icon"><image class="profile-state-icon-sprite" src="/assets/ui/custom-icons/profile-recycle.png" mode="scaleToFill" /></view><text>模块回收站</text><image class="arrow" src="/assets/ui/icons/chevron-right.svg" /></button>
           </view>
         </view>
       </view>
     </scroll-view>
   </swiper-item>
 </swiper>
-<view wx:if="{{memorySelectionOpen}}" class="beta-overlay memory-select-overlay sheet-motion-overlay {{memorySelectionClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeMemorySelection"><view class="beta-sheet memory-select-sheet sheet-motion-panel {{memorySelectionClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">选择模块和月份</text><view class="memory-month-selector"><view bindtap="previousMemoryMonth"><image src="/assets/ui/icons/chevron-left.svg" /></view><text>{{memoryMonthLabel}}</text><view bindtap="nextMemoryMonth"><image src="/assets/ui/icons/chevron-right.svg" /></view></view><view class="memory-module-options"><button class="{{memorySelectedModuleId === item.moduleId ? 'selected' : ''}}" wx:for="{{memoryModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtap="selectMemoryModule">{{item.name}}</button></view></view></view>
+<view wx:if="{{memorySelectionOpen}}" class="beta-overlay memory-select-overlay sheet-motion-overlay {{memorySelectionClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeMemorySelection">
+  <view class="beta-sheet memory-select-sheet sheet-motion-panel {{memorySelectionClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation">
+    <view class="beta-handle"></view>
+    <view class="sheet-title-row">
+      <text class="beta-sheet-title">选择{{memoryReportMode === 'month' ? '月份' : '周次'}}和模块</text>
+      <view class="sheet-done" bindtap="applyMemorySelection" role="button">完成</view>
+    </view>
+    <view class="memory-month-selector">
+      <button bindtap="previousMemoryDraftPeriod" aria-label="上一周期"><image src="/assets/ui/icons/chevron-left.svg" /></button>
+      <text>{{memoryDraftPeriodLabel}}</text>
+      <button bindtap="nextMemoryDraftPeriod" disabled="{{!memoryDraftCanGoNext}}" aria-label="下一周期"><image src="/assets/ui/icons/chevron-right.svg" /></button>
+    </view>
+    <text class="filter-label">统计范围</text>
+    <scroll-view class="memory-module-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view class="memory-module-options">
+        <button class="{{item.selected ? 'selected' : ''}}" wx:for="{{memoryFilterModules}}" wx:key="moduleId" data-id="{{item.moduleId}}" bindtap="selectMemoryDraftModule">
+          <text>{{item.name}}</text><text wx:if="{{item.selected}}" class="selected-check">✓</text>
+        </button>
+      </view>
+    </scroll-view>
+  </view>
+</view>
 <view wx:if="{{profileEditOpen}}" class="beta-overlay profile-edit-overlay sheet-motion-overlay {{profileEditClosing ? 'sheet-motion-closing' : ''}}" bindtap="closeProfileEditor"><view class="beta-sheet profile-edit-sheet sheet-motion-panel {{profileEditClosing ? 'sheet-motion-closing' : ''}}" catchtap="stopPropagation"><view class="beta-handle"></view><text class="beta-sheet-title">编辑个人资料</text><button class="profile-avatar-picker" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar"><view class="profile-avatar profile-draft-avatar" style="background: {{profileUser.avatarColor}};"><image wx:if="{{profileDraftAvatarUrl}}" src="{{profileDraftAvatarUrl}}" mode="aspectFill" /><text wx:else>{{profileUser.avatarText}}</text></view><text>更换头像</text></button><input class="beta-input profile-nickname-input" type="nickname" maxlength="20" value="{{profileDraftNickname}}" bindinput="onProfileNicknameInput" placeholder="请输入昵称" placeholder-class="text-placeholder" /><button class="beta-primary bottom-action-button profile-save-button" loading="{{profileSaving}}" bindtap="saveProfile">保存资料</button></view></view>
 <privacy-dialog />
