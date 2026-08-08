@@ -131,6 +131,7 @@ let freshHomeStickerTimers: Array<ReturnType<typeof setTimeout>> = [];
 
 const HOME_PREVIEW_SYNC_INTERVAL = 5_000;
 const MEMORY_COLLAGE_BACKGROUND = '/assets/ui/memory-collage-board.webp';
+const DISCOVER_PAGE_PATH = '/pages/discover/index';
 
 const clearPrimaryStickerTimers = () => {
   primaryStickerTimers.forEach((timer) => clearTimeout(timer));
@@ -431,6 +432,10 @@ Page({
   },
 
   changePrimaryTab(index: number) {
+    if (index === 2) {
+      if (typeof wx.switchTab === 'function') void wx.switchTab({ url: DISCOVER_PAGE_PATH });
+      return;
+    }
     if (index < 0 || index > 3 || index === this.data.primaryTabIndex) return;
     cardGestureInProgress = false;
     const leavingMemory = this.data.primaryTabIndex === 1 && index !== 1;
@@ -465,6 +470,10 @@ Page({
 
   onPrimarySwiperChange(event: WechatMiniprogram.CustomEvent<{ current: number }>) {
     const index = event.detail.current;
+    if (index === 2) {
+      if (typeof wx.switchTab === 'function') void wx.switchTab({ url: DISCOVER_PAGE_PATH });
+      return;
+    }
     const leavingMemory = this.data.primaryTabIndex === 1 && index !== 1;
     if (leavingMemory) memoryReportTransitionToken += 1;
     this.setData({
@@ -496,8 +505,6 @@ Page({
         if (loaded) this.tryPlayMemoryEntryAnimation();
       });
       track('memory_view', { reportMode: this.data.memoryReportMode });
-    } else if (index === 2) {
-      track('discover_view', { pageVariant: 'coming_soon' });
     } else if (index === 3) {
       this.loadProfileData();
     }
