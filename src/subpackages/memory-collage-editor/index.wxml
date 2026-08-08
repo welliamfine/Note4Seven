@@ -118,9 +118,6 @@
         <view wx:else class="editor-action-icon"><image class="editor-action-icon-sprite" src="/subpackages/assets/ui/custom-icons/collage-save.png" mode="scaleToFill" /></view>
         <text>{{saving ? '保存中' : '保存'}}</text>
       </view>
-      <view class="editor-discover-button {{dirty || !collageId ? 'disabled' : ''}}" role="button" bindtap="shareToDiscovery" aria-disabled="{{dirty || !collageId}}">
-        <image src="/assets/ui/icons/compass.svg" mode="aspectFit" /><text>发现</text>
-      </view>
     </view>
   </view>
 

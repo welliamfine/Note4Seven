@@ -11,10 +11,6 @@
         <view><text class="invite-title">当前成员</text><text class="invite-count">{{view.members.length}}/{{view.memberLimit}}人</text><text class="invite-copy">邀请卡片有效期24小时</text></view>
         <image class="invite-decoration" src="/subpackages/assets/ui/invite-paper-bag.png" mode="aspectFit" />
       </view>
-      <view wx:if="{{view.currentRole === 'creator'}}" class="recruit-card {{view.inviteAvailable ? '' : 'invite-disabled'}}" bindtap="openRecruitmentPublish" role="button">
-        <view><text class="invite-title">公开招募</text><text class="recruit-copy">在发现页邀请新的记录伙伴</text></view>
-        <image src="/assets/ui/icons/compass.svg" mode="aspectFit" />
-      </view>
       <text class="beta-section-title">成员列表</text>
       <view class="member-list beta-glass">
         <view class="beta-row" wx:for="{{view.members}}" wx:key="memberInstanceId" data-id="{{item.memberInstanceId}}" bindtap="selectMember">

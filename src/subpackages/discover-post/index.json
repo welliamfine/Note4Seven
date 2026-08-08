@@ -1,6 +1,0 @@
-{
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "discovery-post-card": "/components/discovery-post-card/index"
-  }
-}

@@ -85,10 +85,6 @@
     {
       "file": "021_memory_collage_fixed_board_bounds.sql",
       "sha256": "15eb3a0267990b77b702f26c9ac3271cb82fbf5aea105aa79d531e675486fe5d"
-    },
-    {
-      "file": "022_discovery_community.sql",
-      "sha256": "5c856334d8dd872d15d910890174171062b744865b9c5861ae0c08640a044e60"
     }
   ]
 }

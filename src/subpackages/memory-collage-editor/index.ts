@@ -179,7 +179,6 @@ Page({
     reportMode: 'month' as MemoryReportMode,
     periodKey: '',
     version: 0,
-    collageId: '',
     loading: true,
     saving: false,
     exporting: false,
@@ -264,7 +263,6 @@ Page({
       ), view.decorativeStickers);
       const recordStickers = this.presentRecordStickers(view.availableRecordStickers, items);
       this.setData({
-        collageId: view.collage?.collageId ?? '',
         version: view.collage?.version ?? 0,
         items,
         boardAssetId: activeBoard?.boardAssetId ?? '',
@@ -652,12 +650,7 @@ Page({
           zIndex: item.zIndex,
         })),
       });
-      this.setData({
-        saving: false,
-        dirty: false,
-        version: view.collage?.version ?? this.data.version,
-        collageId: view.collage?.collageId ?? this.data.collageId,
-      });
+      this.setData({ saving: false, dirty: false, version: view.collage?.version ?? this.data.version });
       this.disableLeaveAlert();
       wx.setStorageSync('notemylife.memory.collage.saved', true);
       wx.showToast({ title: '回忆已保存', icon: 'success' });
@@ -682,17 +675,6 @@ Page({
       return;
     }
     void this.exportCard();
-  },
-
-  shareToDiscovery() {
-    if (this.data.dirty || !this.data.collageId) {
-      wx.showToast({ title: '请先保存当前拼贴', icon: 'none' });
-      return;
-    }
-    track('discovery_share_source_click', { source: 'board', collageId: this.data.collageId });
-    void wx.navigateTo({
-      url: `/subpackages/discover-publish/index?postType=board&sourceId=${encodeURIComponent(this.data.collageId)}`,
-    });
   },
 
   async exportCard() {

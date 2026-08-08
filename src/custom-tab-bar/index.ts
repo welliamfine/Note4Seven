@@ -6,7 +6,6 @@ interface PrimaryTabHost {
 }
 
 const NOTIFICATION_SYNC_INTERVAL = 5_000;
-const DISCOVER_PAGE_PATH = '/pages/discover/index';
 let notificationSyncTimer: ReturnType<typeof setInterval> | undefined;
 
 Component({
@@ -64,11 +63,6 @@ Component({
     switchTab(event: WechatMiniprogram.TouchEvent) {
       const index = Number(event.currentTarget.dataset.index);
       const pagePath = event.currentTarget.dataset.path as string;
-      if (index === 2) {
-        this.setData({ selected: index });
-        wx.switchTab({ url: DISCOVER_PAGE_PATH });
-        return;
-      }
       if (index === this.data.selected) return;
       const pages = getCurrentPages();
       const currentPage = pages[pages.length - 1] as unknown as PrimaryTabHost | undefined;

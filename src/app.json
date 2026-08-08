@@ -20,9 +20,6 @@
         "module-gallery/index",
         "memory-collage-editor/index",
         "reward-collection/index",
-        "discover-post/index",
-        "discover-publish/index",
-        "discover-recruitment/index",
         "recycle-bin/index",
         "privacy/index"
       ]

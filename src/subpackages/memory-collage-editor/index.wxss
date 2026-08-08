@@ -273,8 +273,7 @@
 }
 
 .editor-clear-button,
-.editor-save-button,
-.editor-discover-button {
+.editor-save-button {
   min-width: 0;
   height: 88rpx;
   margin: 0;
@@ -325,16 +324,13 @@
 .editor-clear-button.disabled { opacity: .42; }
 
 .editor-save-button {
-  width: 190rpx;
+  width: 224rpx;
   gap: 12rpx;
   background: #f1c3bf;
   box-shadow: 0 8rpx 20rpx rgba(148,92,87,.16);
 }
 
 .editor-save-button.disabled { opacity: .55; }
-.editor-discover-button { width: 150rpx; gap: 10rpx; border: 2rpx solid rgba(205,199,190,.65); background: rgba(255,255,255,.45); }
-.editor-discover-button image { width: 34rpx; height: 34rpx; }
-.editor-discover-button.disabled { opacity: .42; }
 
 .editor-save-spinner {
   width: 24rpx;

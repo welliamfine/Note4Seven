@@ -83,10 +83,6 @@ export class LocalStorageService extends StorageService {
     await this.writeUpload(key, output);
   }
 
-  override async copyObject(sourceKey: string, destinationKey: string): Promise<void> {
-    await this.writeUpload(destinationKey, await readFile(this.objectPath(sourceKey)));
-  }
-
   override async createMemoryCardExport(input: {
     objectKey: string;
     moduleName: string;
